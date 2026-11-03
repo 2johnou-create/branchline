@@ -36,6 +36,9 @@ class Settings:
     stripe_price_solo: str = ""
     stripe_price_studio: str = ""
     stripe_price_agency: str = ""
+    stripe_price_pack_spark: str = ""
+    stripe_price_pack_boost: str = ""
+    stripe_price_pack_reserve: str = ""
     engine_cleanup_secret: str = ""
     enforce_host: bool = False
     billing_enabled: bool = False
@@ -95,6 +98,9 @@ class Settings:
             stripe_price_solo=os.environ.get("STRIPE_PRICE_SOLO", ""),
             stripe_price_studio=os.environ.get("STRIPE_PRICE_STUDIO", ""),
             stripe_price_agency=os.environ.get("STRIPE_PRICE_AGENCY", ""),
+            stripe_price_pack_spark=os.environ.get("STRIPE_PRICE_PACK_SPARK", ""),
+            stripe_price_pack_boost=os.environ.get("STRIPE_PRICE_PACK_BOOST", ""),
+            stripe_price_pack_reserve=os.environ.get("STRIPE_PRICE_PACK_RESERVE", ""),
             engine_cleanup_secret=os.environ.get("BRANCHLINE_ENGINE_CLEANUP_SECRET", ""),
             enforce_host=True,
             billing_enabled=os.environ.get("BRANCHLINE_BILLING_ENABLED", "false").lower() == "true",

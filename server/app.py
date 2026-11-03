@@ -1,5 +1,6 @@
 """Authenticated, tenant-isolated gateway for an operator-managed pilot."""
 import asyncio
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager, suppress
 import logging
 import os
@@ -22,7 +23,7 @@ from .config import Settings
 from .auth import Auth, EmailBody, LoginBody, PasswordBody, RegisterBody, ResetBody, TokenBody, hash_password, verify_password
 from .billing import Billing, BillingError
 from .engine import Engine, EngineFailure
-from .store import ACTIVE, Store, QuotaExceeded
+from .store import ACTIVE, FREE_ALLOWANCE, FREE_INTERVAL_SECONDS, Store, QuotaExceeded
 
 logger = logging.getLogger("branchline")
 
@@ -61,10 +62,41 @@ def public_run(row):
         "status": row["status"], "stage": row["stage"], "progress": row["progress"],
         "created_at": row["created_at"], "updated_at": row["updated_at"], "expires_at": row["expires_at"],
         "credits_reserved": row["credits_reserved"], "result": private.get("result"), "error": private.get("error"),
+        "telemetry": public_telemetry(private.get("telemetry", {})),
         "privacy_receipt": {"processors": ["Branchline gateway", "Private MiroFish engine", "Operator-configured LLM provider", "Zep Cloud"],
                             "gateway_retention_days": request.get("privacy", {}).get("retention_days", 7),
                             "notes": PRIVACY_NOTES},
     }
+
+
+def public_telemetry(value):
+    """Publish observed counts and workflow timestamps, never provider bodies."""
+    if not isinstance(value, dict):
+        return {}
+    result = {}
+    for key in ("agents_total", "entities_count", "agents_active", "current_round", "total_rounds", "actions_count"):
+        number = value.get(key)
+        if isinstance(number, int) and not isinstance(number, bool) and 0 <= number <= 1_000_000_000:
+            result[key] = number
+    for key in ("observed_at", "stage_started_at"):
+        timestamp = value.get(key)
+        if isinstance(timestamp, str) and len(timestamp) <= 64:
+            try:
+                datetime.fromisoformat(timestamp)
+            except ValueError:
+                continue
+            result[key] = timestamp
+    if value.get("source") in ("gateway", "mirofish"):
+        result["source"] = value["source"]
+    if value.get("runner_status") in ("idle", "starting", "running", "paused", "stopping", "stopped", "completed", "failed"):
+        result["runner_status"] = value["runner_status"]
+    timeline = value.get("timeline")
+    if isinstance(timeline, list):
+        result["timeline"] = [{"stage": item["stage"][:100], "status": item["status"], "at": item["at"][:64]}
+                              for item in timeline[-12:] if isinstance(item, dict)
+                              and isinstance(item.get("stage"), str) and isinstance(item.get("at"), str)
+                              and item.get("status") in (*ACTIVE, "completed", "failed", "interrupted", "cancelled")]
+    return result
 
 
 def create_app(settings=None, *, engine=None, launch_jobs=True, mailer=None, billing=None):
@@ -78,7 +110,23 @@ def create_app(settings=None, *, engine=None, launch_jobs=True, mailer=None, bil
     worker_id = str(uuid.uuid4())
 
     async def execute(wid, rid, payload):
+        initial = store.get(wid, rid)
+        timeline = [{"stage": "Queued", "status": "queued", "at": initial["created_at"]}] if initial else []
+        stage = "Queued"
+        status = "queued"
+        stage_started_at = initial["created_at"] if initial else datetime.now(timezone.utc).isoformat()
+
         def update(**changes):
+            nonlocal stage, status, stage_started_at
+            status = changes.get("status", status)
+            now = datetime.now(timezone.utc).isoformat()
+            if changes.get("stage") and changes["stage"] != stage:
+                stage = changes["stage"]
+                stage_started_at = now
+                timeline.append({"stage": stage, "status": status, "at": now})
+            telemetry = changes.pop("telemetry", {})
+            telemetry.update({"stage_started_at": stage_started_at, "observed_at": now, "timeline": timeline[-12:]})
+            changes["telemetry"] = telemetry
             store.update(wid, rid, **changes)
         try:
             async with asyncio.timeout(settings.job_timeout):
@@ -232,7 +280,8 @@ def create_app(settings=None, *, engine=None, launch_jobs=True, mailer=None, bil
             row = store.workspace(credentials.credentials)
         else:
             user = await account_user(request)
-            row = {"id": user["workspace_id"], "name": user["workspace_name"], "credits": user["credits"]}
+            row = {"id": user["workspace_id"], "name": user["workspace_name"], "credits": user["credits"],
+                   "credit_wallet": user["credit_wallet"]}
         if not row:
             raise HTTPException(401, "A valid workspace token is required", headers={"WWW-Authenticate": "Bearer"})
         if not store.allow_request(row["id"], settings.requests_per_minute):
@@ -243,6 +292,7 @@ def create_app(settings=None, *, engine=None, launch_jobs=True, mailer=None, bil
         return {"user": {"id": user["id"], "email": user["email"], "name": user["name"], "email_verified": bool(user["email_verified"])},
                 "workspace": {"id": user["workspace_id"], "name": user["workspace_name"]},
                 "credits_remaining": user["credits"], "subscription": billing.summary(user["workspace_id"]),
+                "credit_wallet": user["credit_wallet"],
                 "csrf_token": auth.csrf_token(raw_session)}
 
     @app.get("/api/v1/config")
@@ -250,7 +300,10 @@ def create_app(settings=None, *, engine=None, launch_jobs=True, mailer=None, bil
         return {"mode": "selfhost", "auth": {"enabled": True, "signup_enabled": auth.signup_enabled,
                 "signup_restricted": bool(settings.signup_allowed_emails),
                 "email_verification_required": settings.require_email_verification, "email_delivery_ready": auth.mailer.ready},
-                "billing": {"enabled": billing.enabled, "plans": billing.plans},
+                "billing": {"enabled": billing.enabled, "plans": billing.plans, "packs": billing.packs,
+                            "packs_enabled": billing.packs_enabled,
+                            "free_plan": {"credits": FREE_ALLOWANCE, "capacity": FREE_ALLOWANCE,
+                                          "interval_hours": FREE_INTERVAL_SECONDS // 3600}},
                 "engine": {"configured": settings.engine_enabled, "verified": False}}
 
     @app.post("/api/v1/auth/register")
@@ -342,6 +395,7 @@ def create_app(settings=None, *, engine=None, launch_jobs=True, mailer=None, bil
         response = JSONResponse({"account_deleted": True, "gateway_content_deleted": True,
             "cleanup_pending": bool(pending), "cleanup_task_ids": pending,
             "notes": ["Minimal encrypted resource references remain while upstream erasure is pending.",
+                      "A keyed email marker can remain until the next 48-hour free-credit refresh to prevent duplicate free grants; it contains no raw email address.",
                       "Payment transaction records may be retained for accounting; provider backups follow their own retention policies."]})
         auth.logout(request, response)
         return response
@@ -353,6 +407,14 @@ def create_app(settings=None, *, engine=None, launch_jobs=True, mailer=None, bil
     @app.post("/api/v1/billing/checkout")
     async def checkout(body: CheckoutBody, user=Depends(account_user)):
         return {"url": await billing.checkout(user, body.plan)}
+
+    class PackBody(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        pack: Literal["spark", "boost", "reserve"]
+
+    @app.post("/api/v1/billing/pack")
+    async def checkout_pack(body: PackBody, user=Depends(account_user)):
+        return {"url": await billing.checkout_pack(user, body.pack)}
 
     @app.post("/api/v1/billing/portal")
     async def portal(user=Depends(account_user)):
@@ -370,10 +432,12 @@ def create_app(settings=None, *, engine=None, launch_jobs=True, mailer=None, bil
     async def capabilities(ws=Depends(workspace)):
         return {"workspace": {"id": ws["id"], "name": ws["name"]},
                 "usage": {"credits_remaining": ws["credits"], "max_rounds": settings.max_rounds,
+                          "credit_wallet": ws.get("credit_wallet") or store.wallet(ws["id"]),
                           "max_active_runs": settings.max_active_runs, "credit_cost_formula": "1 + rounds",
                           "max_agents": settings.max_agents},
                 "privacy": {"gateway_encryption": True, "upstream_processors": ["Operator-configured LLM provider", "Zep Cloud"], "notes": PRIVACY_NOTES},
-                "billing": {"enabled": billing.enabled, "mode": "subscription" if billing.enabled else "operator-managed"}}
+                "billing": {"enabled": billing.enabled, "packs_enabled": billing.packs_enabled,
+                            "mode": "subscription" if billing.enabled else "operator-managed"}}
 
     class QuoteBody(BaseModel):
         model_config = ConfigDict(extra="forbid")
@@ -384,6 +448,7 @@ def create_app(settings=None, *, engine=None, launch_jobs=True, mailer=None, bil
         if body.rounds > settings.max_rounds:
             raise HTTPException(422, "Round count exceeds the workspace limit")
         return {"credits_required": 1 + body.rounds, "credits_remaining": ws["credits"],
+                "credit_wallet": ws.get("credit_wallet") or store.wallet(ws["id"]),
                 "sufficient": ws["credits"] >= 1 + body.rounds}
 
     @app.post("/api/v1/runs", status_code=202)
@@ -409,6 +474,17 @@ def create_app(settings=None, *, engine=None, launch_jobs=True, mailer=None, bil
         if not row:
             raise HTTPException(404, "Run not found")
         return public_run(row)
+
+    @app.get("/api/v1/runs/{rid}/brief")
+    async def get_owned_brief(rid: str, ws=Depends(workspace)):
+        row = store.get(ws["id"], rid)
+        if not row:
+            raise HTTPException(404, "Run not found")
+        original = row["private"]["request"]
+        # An explicit owner action can reuse their context without exposing it
+        # in every library poll. Prior consent is never carried to a new run.
+        return {"source_run_id": rid,
+                "brief": {key: original[key] for key in ("title", "question", "context", "audience", "rounds", "template", "privacy") if key in original}}
 
     @app.delete("/api/v1/runs/{rid}")
     async def delete_run(rid: str, ws=Depends(workspace)):

@@ -1,5 +1,6 @@
 """Bounded adapter for the pinned MiroFish HTTP API, never a general proxy."""
 import asyncio
+from datetime import datetime, timezone
 from urllib.parse import quote
 
 import httpx
@@ -46,6 +47,22 @@ class Engine:
             raise EngineFailure("The simulation engine returned an incomplete response.")
         return value
 
+    @staticmethod
+    def observed_counts(state):
+        """Only expose measured counters; process IDs and action bodies stay private."""
+        result = {"source": "mirofish", "observed_at": datetime.now(timezone.utc).isoformat()}
+        for output, inputs in (("current_round", ("twitter_current_round", "current_round")),
+                               ("total_rounds", ("total_rounds",)),
+                               ("actions_count", ("total_actions_count", "twitter_actions_count"))):
+            for name in inputs:
+                value = state.get(name)
+                if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                    result[output] = value
+                    break
+        if state.get("runner_status") in ("idle", "starting", "running", "paused", "stopping", "stopped", "completed", "failed"):
+            result["runner_status"] = state["runner_status"]
+        return result
+
     async def task(self, client, method, path, *, body=None, update=None, base=0, span=10):
         while True:
             data = await self.call(client, method, path, **({"json": body} if body else {}))
@@ -61,7 +78,8 @@ class Engine:
 
     async def run(self, payload, update):
         async with self.client() as client:
-            update(status="building", stage="Reading context", progress=3)
+            update(status="building", stage="Reading context", progress=3,
+                   telemetry={"source": "gateway", "total_rounds": payload["rounds"]})
             requirement = f"{payload['question']}\n\nAudience: {payload['audience']}\n\nTreat this as a synthetic scenario, not a prediction of real people."
             context = payload["context"] + "\n\nAudience definition:\n" + payload["audience"]
             data = await self.call(client, "POST", "/api/graph/ontology/generate",
@@ -84,6 +102,7 @@ class Engine:
                 raise EngineFailure("The scenario did not produce any usable simulated entities. Try a more specific audience and context.")
             if count > self.settings.max_agents:
                 raise EngineFailure("This scenario exceeds the workspace agent limit. Narrow the context before trying again.")
+            update(telemetry={"source": "mirofish", "entities_count": count})
             created = await self.call(client, "POST", "/api/simulation/create", json={
                 "project_id": project_id, "graph_id": graph_id,
                 "enable_twitter": True, "enable_reddit": False})
@@ -94,6 +113,11 @@ class Engine:
                 await self.task(client, "POST", "/api/simulation/prepare/status",
                     body={"simulation_id": sid, "task_id": self.identifier(prepared, "task_id")},
                     update=update, base=32, span=23)
+            population = await self.call(client, "GET", "/api/simulation/" + quote(sid, safe=""))
+            agents = population.get("profiles_count")
+            if not isinstance(agents, int) or isinstance(agents, bool) or not 1 <= agents <= self.settings.max_agents:
+                raise EngineFailure("The prepared scenario did not produce a permitted number of participants. Contact your workspace operator.")
+            update(telemetry={"source": "mirofish", "agents_total": agents})
             update(status="running", stage="Running scenario", progress=55)
             await self.call(client, "POST", "/api/simulation/start", json={
                 "simulation_id": sid, "platform": "twitter", "max_rounds": payload["rounds"],
@@ -101,6 +125,7 @@ class Engine:
             environment_closed = False
             while True:
                 state = await self.call(client, "GET", "/api/simulation/" + quote(sid, safe="") + "/run-status")
+                update(telemetry=self.observed_counts(state))
                 status = state.get("runner_status")
                 if status in ("completed", "stopped"):
                     break

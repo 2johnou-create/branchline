@@ -6,14 +6,14 @@
 
 ## Implemented application
 
-- Guided launch, pricing and response scenarios with a local redaction and exact-payload review.
+- A guided four-step scenario studio with starter briefs, local coaching, redaction and exact-payload review.
 - Same-origin signup, email verification, login, recovery and logout; hashed passwords/sessions, HttpOnly cookies and CSRF protection.
 - Separate private workspaces, encrypted brief/report payloads, account export and account deletion.
 - Server-quoted workload credits, atomic reservations, persisted single-node job claims/leases, restart handling and bounded MiroFish orchestration.
 - Real engine graph/profile/simulation/report flow, including orderly closure after the selected rounds finish.
-- Optional Stripe-hosted checkout and portal, signed webhooks, idempotent invoice credits and subscription lifecycle handling.
+- A separate capped free wallet that refreshes every 48 hours, subscription credits and non-expiring banked credits; optional Stripe-hosted subscriptions and one-off packs.
 - Per-run retention, authenticated private simulation-file deletion, encrypted unresolved-cleanup records and automatic retries.
-- Responsive browser interface, safe report rendering and clearly labelled optional prewritten examples.
+- A responsive simulation observatory with an animated illustrative field, observed agent/round/action telemetry and workflow history; safe reports and clearly labelled prewritten examples.
 
 **Deployment status:** the application is deployed at [branchline-app.onrender.com](https://branchline-app.onrender.com), with its MiroFish engine running privately on Render. This is an owner-only email pilot: signup, verification, signed-in accounts and credit balances work. A real one-round test completed automatically through graph building, participant preparation, recorded simulation actions and report generation. Subscription checkout is paused. The Sites address remains a separate static demonstration. Public email delivery needs a verified sending domain; public onboarding, live cleanup verification and Stripe activation remain in [the setup guide](docs/SETUP.md). Reports use recorded output; live follow-up interviews are unavailable after the simulation closes.
 
@@ -65,7 +65,7 @@ That command performs real one-round work and can incur provider charges. See th
 
 Cloud inference processes plaintext. Gateway field encryption does not encrypt every metadata column or the engine volume. Use encrypted disks/backups, protect the master secret, and inspect deletion receipts: provider backups and legally retained payment records have separate lifecycles. [Full data flow and retention details](docs/PRIVACY.md).
 
-Credits are bounded workload allowances (`1 + rounds`), not a measured provider-spend guarantee. Plans are AUD49/199/599 monthly with 30/150/500 credits, with operator-configured Stripe Prices. Configure tax presentation, terms and support before live checkout. This is a single-instance service with a durable SQLite queue, not a horizontally scaled hosted enterprise platform. [Launch and operating requirements](docs/LAUNCH.md).
+Credits are workload allowances (`1 + rounds`), not a measured provider-spend guarantee. Verified personal accounts receive a capped allowance of 4 credits every 48 hours. Plus/Studio/Pro are A$9/19/49 monthly with 90/240/700 period credits; Spark/Boost/Reserve one-off packs are A$4/9/19 for 24/60/150 banked credits. Purchased and operator-granted banked credits do not expire; unused free windows do not accumulate. Configure matching Stripe Prices, tax presentation, terms and support before live checkout. This is a single-instance pilot, not million-agent infrastructure: the visual field is illustrative and actual counters are shown separately. [Launch and operating requirements](docs/LAUNCH.md).
 
 ## Source
 

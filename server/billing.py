@@ -18,13 +18,18 @@ import httpx
 
 API_VERSION = "2025-06-30.basil"
 PLAN_DATA = {
-    "solo": {"id": "solo", "name": "Solo", "price_aud": 49, "credits": 30, "monthly_credits": 30, "interval": "month"},
-    "studio": {"id": "studio", "name": "Studio", "price_aud": 199, "credits": 150, "monthly_credits": 150, "interval": "month"},
-    "agency": {"id": "agency", "name": "Agency", "price_aud": 599, "credits": 500, "monthly_credits": 500, "interval": "month"},
+    "solo": {"id": "solo", "name": "Plus", "price_aud": 9, "credits": 90, "monthly_credits": 90, "interval": "month"},
+    "studio": {"id": "studio", "name": "Studio", "price_aud": 19, "credits": 240, "monthly_credits": 240, "interval": "month"},
+    "agency": {"id": "agency", "name": "Pro", "price_aud": 49, "credits": 700, "monthly_credits": 700, "interval": "month"},
+}
+PACK_DATA = {
+    "spark": {"id": "spark", "name": "Spark", "price_aud": 4, "credits": 24, "interval": "one_time", "expires": False},
+    "boost": {"id": "boost", "name": "Boost", "price_aud": 9, "credits": 60, "interval": "one_time", "expires": False},
+    "reserve": {"id": "reserve", "name": "Reserve", "price_aud": 19, "credits": 150, "interval": "one_time", "expires": False},
 }
 REVOKED = {"canceled", "unpaid", "incomplete_expired", "paused"}
 TERMINAL_SUBSCRIPTIONS = {"canceled", "incomplete_expired"}
-EVENT_TYPES = {"checkout.session.completed", "customer.subscription.created",
+EVENT_TYPES = {"checkout.session.completed", "checkout.session.async_payment_succeeded", "customer.subscription.created",
                "customer.subscription.updated", "customer.subscription.deleted",
                "invoice.paid", "invoice.payment_failed"}
 
@@ -51,6 +56,7 @@ class Billing:
         self.webhook_secret = getattr(settings, "stripe_webhook_secret", "")
         self.public_url = getattr(settings, "public_url", "").rstrip("/")
         self.price_ids = {p: getattr(settings, "stripe_price_" + p, "") for p in PLAN_DATA}
+        self.pack_price_ids = {p: getattr(settings, "stripe_price_pack_" + p, "") for p in PACK_DATA}
         self._locks = {}
         with store.connection() as db:
             db.executescript("""
@@ -74,23 +80,44 @@ class Billing:
                 period_start INTEGER NOT NULL, period_end INTEGER NOT NULL,
                 plan TEXT NOT NULL, credits INTEGER NOT NULL,
                 UNIQUE(subscription_id,period_start));
+              CREATE TABLE IF NOT EXISTS billing_pack_checkouts (
+                checkout_key TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+                user_id TEXT NOT NULL, pack TEXT NOT NULL, session_id TEXT UNIQUE,
+                expires_at INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'open',
+                credits_granted INTEGER NOT NULL DEFAULT 0, payment_intent TEXT UNIQUE);
             """)
 
     @property
     def configured(self):
         parsed = urlparse(self.public_url)
         return bool(self.secret and self.webhook_secret and
-                    all(self.price_ids.values()) and len(set(self.price_ids.values())) == 3 and
+                    (self.subscription_prices_configured or self.pack_prices_configured) and
                     parsed.scheme == "https" and parsed.netloc and not parsed.query and not parsed.fragment)
 
     @property
+    def subscription_prices_configured(self):
+        return bool(all(self.price_ids.values()) and len(set(self.price_ids.values())) == len(PLAN_DATA))
+
+    @property
+    def pack_prices_configured(self):
+        return bool(all(self.pack_price_ids.values()) and len(set(self.pack_price_ids.values())) == len(PACK_DATA) and not (set(self.pack_price_ids.values()) & (set(self.price_ids.values()) - {""})))
+
+    @property
     def enabled(self):
-        return bool(self.configured and getattr(self.settings, "billing_enabled", False) and
+        return bool(self.configured and self.subscription_prices_configured and getattr(self.settings, "billing_enabled", False) and
                     getattr(self.settings, "engine_enabled", False))
+
+    @property
+    def packs_enabled(self):
+        return bool(self.configured and self.pack_prices_configured and getattr(self.settings, "billing_enabled", False) and getattr(self.settings, "engine_enabled", False))
 
     @property
     def plans(self):
         return [dict(p) for p in PLAN_DATA.values()]
+
+    @property
+    def packs(self):
+        return [dict(p) for p in PACK_DATA.values()]
 
     def require_enabled(self):
         if not self.enabled:
@@ -108,6 +135,8 @@ class Billing:
         result = dict(row)
         result["cancel_at_period_end"] = bool(result["cancel_at_period_end"])
         result["checkout_pending"] = bool((result.pop("checkout_expires") or 0) > time.time())
+        if not result["plan"] and result["status"] == "none" and not result["checkout_pending"]:
+            return None  # a one-time pack buyer is still on the Free plan
         return result
 
     @asynccontextmanager
@@ -128,7 +157,37 @@ class Billing:
                     raise BillingError(409, "Cancel your subscription in the billing portal before deleting your account.")
                 if (account["checkout_expires"] or 0) > time.time():
                     raise BillingError(409, "An open checkout must finish or expire before this account can be deleted.")
+            await self._guard_pack_deletion(wid, account)
             yield
+
+    async def _guard_pack_deletion(self, wid, account):
+        # A webhook can be delayed beyond Checkout expiry. Reconcile expired
+        # local orders with Stripe before allowing destructive account changes.
+        with self.store.connection() as db:
+            orders = [dict(row) for row in db.execute("SELECT * FROM billing_pack_checkouts WHERE workspace_id=? AND credits_granted=0 AND status IN ('open','processing')", (wid,))]
+        for order in orders:
+            if order["status"] == "open" and order["expires_at"] > int(time.time()):
+                raise BillingError(409, "An open credit-pack checkout must finish or expire before this account can be deleted.")
+            if not order["session_id"] or not account or not account["customer_id"]:
+                # A creation timeout may have succeeded remotely. Do not infer
+                # that no payment exists from a missing local session ID.
+                raise BillingError(409, "The credit-pack checkout needs operator reconciliation before account deletion.")
+            self.require_configured()
+            session = await self._call("GET", "/v1/checkout/sessions/" + identifier(order["session_id"], "cs"))
+            metadata = session.get("metadata") or {}
+            if (session.get("id") != order["session_id"] or session.get("mode") != "payment" or
+                session.get("customer") != account["customer_id"] or
+                metadata.get("checkout_key") != order["checkout_key"] or
+                metadata.get("workspace_id") != wid or metadata.get("user_id") != order["user_id"]):
+                raise BillingError(409, "The credit-pack checkout needs operator reconciliation before account deletion.")
+            if session.get("status") == "expired" and session.get("payment_status") == "unpaid":
+                with self.store.connection(write=True) as db:
+                    db.execute("UPDATE billing_pack_checkouts SET status='expired' WHERE checkout_key=? AND credits_granted=0", (order["checkout_key"],))
+                continue
+            if session.get("status") == "complete" and session.get("payment_status") != "paid":
+                with self.store.connection(write=True) as db:
+                    db.execute("UPDATE billing_pack_checkouts SET status='processing' WHERE checkout_key=? AND credits_granted=0", (order["checkout_key"],))
+            raise BillingError(409, "The credit-pack checkout payment must settle and reconcile before account deletion. Wait for your balance to update or contact the operator.")
 
     def _account(self, wid):
         with self.store.connection() as db:
@@ -254,6 +313,120 @@ class Billing:
         })
         return self._hosted_url(session.get("url"), "billing.stripe.com")
 
+    def _validate_pack_price(self, price, pack, *, active=False):
+        if (price.get("id") != self.pack_price_ids[pack] or price.get("currency") != "aud" or
+            price.get("unit_amount") != PACK_DATA[pack]["price_aud"] * 100 or
+            price.get("type") != "one_time" or price.get("recurring") or
+            (active and price.get("active") is not True)):
+            raise BillingError(503, "The credit-pack configuration needs operator attention.")
+
+    async def checkout_pack(self, user, pack):
+        if not self.packs_enabled:
+            raise BillingError(503, "Credit-pack checkout is not enabled. Contact the operator.")
+        if pack not in PACK_DATA:
+            raise BillingError(422, "Choose a supported credit pack.")
+        wid, _ = self._owner(user)
+        async with self._locks.setdefault(wid, asyncio.Lock()):
+            _, account = self._owner(user)
+            price = await self._call("GET", "/v1/prices/" + identifier(self.pack_price_ids[pack], "price"))
+            self._validate_pack_price(price, pack, active=True)
+            customer = account["customer_id"]
+            if not customer:
+                created = await self._call("POST", "/v1/customers", data={
+                    "metadata[workspace_id]": wid, "metadata[user_id]": user["id"],
+                }, key="branchline-customer-" + wid)
+                customer = identifier(created.get("id"), "cus")
+                with self.store.connection(write=True) as db:
+                    db.execute("UPDATE billing_accounts SET customer_id=? WHERE workspace_id=? AND customer_id IS NULL", (customer, wid))
+                customer = self._account(wid)["customer_id"]
+            now = int(time.time())
+            with self.store.connection() as db:
+                existing = db.execute("SELECT * FROM billing_pack_checkouts WHERE workspace_id=? AND (status='processing' OR (status='open' AND expires_at>?)) ORDER BY expires_at DESC LIMIT 1", (wid, now)).fetchone()
+            if existing:
+                order = dict(existing)
+                if order["status"] == "processing":
+                    raise BillingError(409, "Your previous credit-pack payment is still processing. Wait for your balance to update or contact the operator.")
+                if order["pack"] != pack:
+                    raise BillingError(409, "A checkout is already open for another credit pack. Complete it or wait for it to expire.")
+                if order["session_id"]:
+                    session = await self._call("GET", "/v1/checkout/sessions/" + identifier(order["session_id"], "cs"))
+                    if session.get("status") == "open":
+                        return self._hosted_url(session.get("url"), "checkout.stripe.com")
+                    raise BillingError(409, "This checkout has finished. Wait for your balance to update.")
+            else:
+                order = {"checkout_key": "branchline-pack-" + uuid.uuid4().hex, "expires_at": now + 3600, "pack": pack}
+                with self.store.connection(write=True) as db:
+                    db.execute("INSERT INTO billing_pack_checkouts(checkout_key,workspace_id,user_id,pack,expires_at) VALUES(?,?,?,?,?)", (order["checkout_key"], wid, user["id"], pack, order["expires_at"]))
+            session = await self._call("POST", "/v1/checkout/sessions", data={
+                "mode": "payment", "customer": customer, "client_reference_id": wid,
+                "metadata[purchase_kind]": "credit_pack", "metadata[workspace_id]": wid,
+                "metadata[user_id]": user["id"], "metadata[pack]": pack,
+                "metadata[checkout_key]": order["checkout_key"],
+                "line_items[0][price]": self.pack_price_ids[pack], "line_items[0][quantity]": "1",
+                "payment_method_types[0]": "card",
+                "success_url": self.public_url + "/#plans", "cancel_url": self.public_url + "/#plans",
+                "expires_at": str(order["expires_at"]),
+            }, key=order["checkout_key"])
+            sid = identifier(session.get("id"), "cs")
+            url = self._hosted_url(session.get("url"), "checkout.stripe.com")
+            with self.store.connection(write=True) as db:
+                db.execute("UPDATE billing_pack_checkouts SET session_id=? WHERE checkout_key=? AND (session_id IS NULL OR session_id=?)", (sid, order["checkout_key"], sid))
+            return url
+
+    async def _fulfill_pack(self, event, session):
+        """Canonical paid session + bound order + atomic grant, never a redirect."""
+        sid = identifier(session.get("id"), "cs")
+        metadata = session.get("metadata") or {}
+        with self.store.connection() as db:
+            row = db.execute("SELECT * FROM billing_pack_checkouts WHERE session_id=? OR checkout_key=?", (sid, metadata.get("checkout_key", ""))).fetchone()
+        if not row:
+            return {"received": True, "ignored": True}
+        order = dict(row)
+        pack, wid = order["pack"], order["workspace_id"]
+        account = self._account(wid)
+        if (not account or pack not in PACK_DATA or
+            order["session_id"] not in (None, sid) or session.get("mode") != "payment" or
+            metadata.get("purchase_kind") != "credit_pack" or
+            metadata.get("workspace_id") != wid or metadata.get("user_id") != order["user_id"] or
+            metadata.get("pack") != pack or metadata.get("checkout_key") != order["checkout_key"] or
+            session.get("client_reference_id") != wid or
+            identifier(session.get("customer"), "cus") != account["customer_id"]):
+            raise BillingError(400, "The credit-pack payment does not match its workspace.")
+        if session.get("status") != "complete" or session.get("payment_status") != "paid":
+            if session.get("status") == "complete":
+                # Checkout expiry is not payment settlement. A delayed payment
+                # can succeed later, so retain this hold until paid/reconciled.
+                with self.store.connection(write=True) as db:
+                    db.execute("UPDATE billing_pack_checkouts SET session_id=?,status='processing' WHERE checkout_key=? AND credits_granted=0 AND (session_id IS NULL OR session_id=?)", (sid, order["checkout_key"], sid))
+            return {"received": True, "pending": True}
+        price = await self._call("GET", "/v1/prices/" + identifier(self.pack_price_ids[pack], "price"))
+        self._validate_pack_price(price, pack)
+        lines = session.get("line_items")
+        if not isinstance(lines, dict):
+            lines = await self._call("GET", "/v1/checkout/sessions/" + sid + "/line_items", params={"limit": 100})
+        items = lines.get("data") or []
+        amount = PACK_DATA[pack]["price_aud"] * 100
+        if (lines.get("has_more") or len(items) != 1 or items[0].get("quantity") != 1 or
+            (items[0].get("price") or {}).get("id") != self.pack_price_ids[pack] or
+            session.get("currency") != "aud" or session.get("amount_subtotal") != amount or
+            not isinstance(session.get("amount_total"), int) or session["amount_total"] < amount):
+            raise BillingError(400, "The credit-pack amount or line items require reconciliation.")
+        payment_intent = identifier(session.get("payment_intent"), "pi")
+        with self.store.connection(write=True) as db:
+            if db.execute("SELECT 1 FROM billing_events WHERE id=?", (event["id"],)).fetchone():
+                return {"received": True, "duplicate": True}
+            current = db.execute("SELECT * FROM billing_pack_checkouts WHERE checkout_key=?", (order["checkout_key"],)).fetchone()
+            ws = db.execute("SELECT blocked FROM workspaces WHERE id=?", (wid,)).fetchone()
+            ignored = not ws or bool(ws["blocked"])
+            if not ignored and not current["credits_granted"]:
+                other = db.execute("SELECT 1 FROM billing_pack_checkouts WHERE payment_intent=? AND checkout_key!=?", (payment_intent, order["checkout_key"])).fetchone()
+                if other:
+                    raise BillingError(400, "This payment has already been reconciled.")
+                db.execute("UPDATE workspaces SET credits=credits+? WHERE id=? AND blocked=0", (PACK_DATA[pack]["credits"], wid))
+                db.execute("UPDATE billing_pack_checkouts SET session_id=?,status='paid',credits_granted=?,payment_intent=? WHERE checkout_key=?", (sid, PACK_DATA[pack]["credits"], payment_intent, order["checkout_key"]))
+            db.execute("INSERT INTO billing_events VALUES(?,?,?,?)", (event["id"], event["type"], event["created"], int(time.time())))
+        return {"received": True, "ignored": ignored}
+
     def _verify(self, raw, signature):
         try:
             if not isinstance(signature, str) or len(signature) > 4096:
@@ -310,9 +483,13 @@ class Billing:
                 return {"received": True, "ignored": True}
             sid = self._invoice_subscription(invoice)
             customer = identifier(invoice.get("customer"), "cus")
-        elif etype == "checkout.session.completed":
-            session = await self._call("GET", "/v1/checkout/sessions/" + identifier(obj.get("id"), "cs"))
+        elif etype in {"checkout.session.completed", "checkout.session.async_payment_succeeded"}:
+            session = await self._call("GET", "/v1/checkout/sessions/" + identifier(obj.get("id"), "cs"), params={"expand[]": "line_items"})
+            if session.get("mode") == "payment":
+                return await self._fulfill_pack(event, session)
             if session.get("mode") != "subscription" or session.get("status") != "complete":
+                return {"received": True, "ignored": True}
+            if etype != "checkout.session.completed":
                 return {"received": True, "ignored": True}
             sid, customer = identifier(session.get("subscription"), "sub"), identifier(session.get("customer"), "cus")
         else:
@@ -396,8 +573,9 @@ class Billing:
                       checkout_key=NULL,checkout_plan=NULL,checkout_expires=NULL,checkout_session=NULL,checkout_url=NULL
                       WHERE workspace_id=?""", (sid, created, plan, status, start, end, int(cancel_at_end), event["created"], wid))
                 if status in REVOKED and not stale:
-                    # blocked is reserved for account deletion; expiry=1 disables compute.
-                    db.execute("UPDATE workspaces SET credits=0,subscription_expires_at=1 WHERE id=? AND blocked=0", (wid,))
+                    # Revocation removes only the subscription allowance. The
+                    # customer's purchased/operator and free pools remain usable.
+                    db.execute("UPDATE workspaces SET subscription_credits=0,subscription_expires_at=1 WHERE id=? AND blocked=0", (wid,))
                 elif grant:
                     latest = db.execute("SELECT MAX(period_start) FROM billing_credit_ledger WHERE workspace_id=?", (wid,)).fetchone()[0]
                     if latest is None or start >= latest:
@@ -405,6 +583,6 @@ class Billing:
                           (invoice_id,event_id,workspace_id,subscription_id,period_start,period_end,plan,credits)
                           VALUES (?,?,?,?,?,?,?,?)""", (grant["invoice"], eid, wid, sid, start, end, plan, grant["credits"])).rowcount
                         if changed:
-                            db.execute("UPDATE workspaces SET credits=?,subscription_expires_at=? WHERE id=? AND blocked=0", (grant["credits"], end, wid))
+                            db.execute("UPDATE workspaces SET subscription_credits=?,subscription_expires_at=? WHERE id=? AND blocked=0", (grant["credits"], end, wid))
             db.execute("INSERT INTO billing_events VALUES (?,?,?,?)", (eid, event["type"], event["created"], int(time.time())))
         return {"received": True, "ignored": ignored}

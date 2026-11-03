@@ -4,7 +4,9 @@ This guide describes the source implementation as of 3 November 2026. It is an a
 
 ## Static demonstration and full application
 
-The static demonstration uses sample scenarios and prewritten illustrative reports. A demo report does not analyse a submitted brief or run MiroFish. Drafts, imported text, and an optional operator workspace token are held in the browser tab's memory rather than deliberately persisted to local storage. Closing or reloading the tab ends that in-memory session. Downloaded exports, screenshots, browser extensions, and host access records are separate copies or access paths outside that promise.
+The static demonstration uses sample scenarios and prewritten illustrative reports. A demo report does not analyse a submitted brief or run MiroFish. By default, drafts and imported text stay in the browser tab's memory; closing or reloading ends that in-memory draft. An optional operator workspace token also stays in memory. Downloaded exports, screenshots, browser extensions, and host access records are separate copies or access paths outside that promise.
+
+The redesigned builder has an unchecked **Save this draft on this device** option. Only after that explicit choice, builder text fields, template and round settings can be stored in this browser's localStorage for up to seven days. Passwords, session or operator tokens, and external-processing consent are excluded. Resume and Remove controls are visible; disabling the option, choosing Remove/Clear local, signing out or changing account, and a successful real submission remove the saved draft. A shared browser profile can expose an opted-in draft to someone using that profile. The seven-day expiry is checked when the application next runs; it is not a background erasure guarantee for an offline device.
 
 The full application serves its interface and API from one HTTPS origin. It supports individual accounts and a private workspace. Email/name, password hashes, hashed session/mail tokens, workspace metadata, and billing references are stored server-side. The account session uses a Secure, HttpOnly, SameSite=Strict cookie on HTTPS and lasts up to seven days unless expired or revoked sooner. The session-bound CSRF token stays in page memory. Signing out revokes the current session; resetting a password revokes that user's existing sessions.
 
@@ -30,6 +32,10 @@ Billing actions -> Stripe-hosted Checkout/portal -> signed webhook -> credit led
 ```
 
 The web host can process connection/access metadata. SMTP processes the account email and a one-time verification or reset link. Stripe processes payment/customer information in its hosted pages; Branchline does not collect card numbers. The billing integration sends opaque user/workspace identifiers as metadata and retains Stripe resource IDs, subscription status/periods, processed event IDs, and credit-grant records. The operator must add actual provider identities and policies to its public notice.
+
+Credit wallets retain free, current-subscription and banked balances, refill/period timestamps and grant/payment identifiers needed for accounting and duplicate protection. These are operational metadata, not encrypted run content. A verified account can receive up to four free credits every 48 hours on any plan; missed periods do not stack. A refill does not share a scenario, submit a job or send a reminder. Purchased/operator banked credits remain separate from the periodically refreshed free allowance and the expiring monthly allowance. Privacy, export and deletion controls do not require a paid plan.
+
+To prevent deletion and recreation with the same verified email from restarting a free window, the gateway retains a short-lived **keyed email marker and refill deadline** for the current 48-hour allowance window. The marker does not contain the raw email, name, brief, report, password or session token. Account deletion can leave this marker until its current window expires, up to 48 hours; the running gateway purges expired markers from the active database. Service downtime can delay that purge, and database journals or operator backups can retain earlier copies until their separate expiry. This is pseudonymous abuse-control metadata, not anonymous data: an operator holding the key and a candidate email can recompute the marker. It does not establish a permanent identity link or prevent every form of multiple-account abuse.
 
 ## Implemented controls and boundaries
 
@@ -64,7 +70,7 @@ Gateway row removal does not revoke exports or screenshots. Database WAL pages, 
 
 A signed-in account can export its current account details and runs, including stored context. Deletion requires its password and no active simulations. The checkout/deletion lock prevents starting a new checkout while the account is being frozen. Existing active subscriptions must be cancelled before deletion; unexpired pending checkout also blocks deletion to avoid a later charge on an erased account.
 
-Account deletion disables the user, clears account email/name/password data, revokes sessions and mail tokens, blocks its workspace and credits, and removes gateway run content into the cleanup workflow. Minimal anonymized account/workspace identifiers, encrypted pending-cleanup references, and financial event/grant records can remain. Stripe, SMTP, hosting and other providers retain their own copies under their policies. A cancelled subscription is not automatically a deleted Stripe customer or erased accounting history.
+Account deletion disables the user, clears account email/name/password data, revokes sessions and mail tokens, blocks its workspace and credits, and removes gateway run content into the cleanup workflow. Minimal anonymized account/workspace identifiers, encrypted pending-cleanup references, financial event/grant records, and the short-lived keyed free-allowance marker described above can remain under their separate lifecycles. Stripe, SMTP, hosting and other providers retain their own copies under their policies. A cancelled subscription is not automatically a deleted Stripe customer or erased accounting history.
 
 ## Claims this build does not establish
 
@@ -73,6 +79,8 @@ Do not advertise zero retention, immediate complete erasure, Australian-only pro
 The processing receipt describes gateway retention and processor categories. The operator must publish exact provider names, regions, policy links and backup periods. Keep unavailable checks visibly unresolved rather than converting them into a success badge.
 
 Synthetic participants are fictional. Their statements and percentages are not evidence of actual people's views or calibrated forecasts. Keep that limitation with reports and validate decisions through real customer research.
+
+An animated network or particle field is an illustration of the computation journey. It is not evidence that the service is executing millions of agents, surveying real people or producing a finding at every animation frame. Only separately labelled observed telemetry establishes the active run's actual agent, round and action counts; unavailable measurements remain unavailable.
 
 ## Before live use
 

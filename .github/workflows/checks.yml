@@ -19,6 +19,5 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: node --check dist/app.js
-      - run: node --check dist/platform.js
+      - run: for source in dist/*.js; do node --check "$source"; done
       - run: python -m py_compile deploy/engine_entry.py

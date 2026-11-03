@@ -223,6 +223,7 @@
   clearLocal = function(){
     if(!state.account){originals.clearLocal();return;}
     if(!confirm('Clear this tab’s local drafts and samples? Your account stays signed in and cloud records remain.'))return;
+    window.BranchlineExperience?.clearDraft();
     state.samples = [];state.sent = 0;state.quote = null;state.quoteConnection = null;state.resumeWizard = false;
     $('#scenario-form').reset();$('#payload-preview').textContent = '';$('#brief-file').value = '';state.report = null;$('#report-content').replaceChildren();if($('#report-dialog').open)$('#report-dialog').close();render();toast('Local drafts and samples cleared. Your account session is still active.');
   };

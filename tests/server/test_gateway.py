@@ -212,6 +212,7 @@ def test_real_engine_adapter_api_flow_and_caps(settings, structured_completion):
         ("POST", "/api/simulation/create", {"simulation_id": "sim_1"}),
         ("POST", "/api/simulation/prepare", {"task_id": "prep_task", "status": "preparing"}),
         ("POST", "/api/simulation/prepare/status", {"status": "ready", "progress": 100}),
+        ("GET", "/api/simulation/sim_1", {"profiles_count": 2}),
         ("POST", "/api/simulation/start", {"runner_status": "running"}),
         ("GET", "/api/simulation/sim_1/run-status", {"runner_status": "running", "progress_percent": 30}),
         ("POST", "/api/simulation/env-status", {"env_alive": False}),
@@ -220,7 +221,7 @@ def test_real_engine_adapter_api_flow_and_caps(settings, structured_completion):
         ("GET", "/api/simulation/sim_1/run-status", {"runner_status": "running", "progress_percent": 100 if structured_completion else 0, "twitter_completed": structured_completion}),
         ("POST", "/api/simulation/env-status", {"env_alive": True}),
         ("POST", "/api/simulation/close-env", {"success": True}),
-        ("GET", "/api/simulation/sim_1/run-status", {"runner_status": "completed"}),
+        ("GET", "/api/simulation/sim_1/run-status", {"runner_status": "completed", "current_round": 5, "total_rounds": 5, "total_actions_count": 17}),
         ("POST", "/api/report/generate", {"report_id": "report_1", "task_id": "report_task"}),
         ("POST", "/api/report/generate/status", {"status": "completed", "progress": 100}),
         ("GET", "/api/report/by-simulation/sim_1", {"report_id": "report_1", "markdown_content": "# Engine report"}),
@@ -246,6 +247,13 @@ def test_real_engine_adapter_api_flow_and_caps(settings, structured_completion):
     assert not responses
     assert any(kw.get("status") == "preparing" for kw in updates)
     assert any(kw.get("upstream", {}).get("report_id") == "report_1" for kw in updates)
+    telemetry = {}
+    for update in updates:
+        telemetry.update(update.get("telemetry", {}))
+    assert telemetry["entities_count"] == 3
+    assert telemetry["agents_total"] == 2
+    assert telemetry["current_round"] == 5 and telemetry["actions_count"] == 17
+    assert telemetry["runner_status"] == "completed"
 
 
 def test_adapter_does_not_return_or_log_provider_error_bodies(settings):

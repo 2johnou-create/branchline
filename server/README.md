@@ -20,6 +20,7 @@ Follow the root deployment guide and `.env.example`. Keep secrets on the host, o
 | `BRANCHLINE_SMTP_HOST`, `PORT`, `USERNAME`, `PASSWORD`, `FROM`, `STARTTLS` | Genuine email delivery. Defaults: port587, STARTTLS true. Port465 uses implicit TLS. Unencrypted SMTP is allowed only on localhost. |
 | `BRANCHLINE_REQUIRE_EMAIL_VERIFICATION` | Default true. Signup is disabled if verification is required but SMTP is absent. False is an explicit operator override for controlled development. |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_SOLO`, `STRIPE_PRICE_STUDIO`, `STRIPE_PRICE_AGENCY` | Optional hosted-billing configuration. Keys alone do not enable new checkout. |
+| `STRIPE_PRICE_PACK_SPARK`, `STRIPE_PRICE_PACK_BOOST`, `STRIPE_PRICE_PACK_RESERVE` | Optional one-time AUD credit-pack Price IDs. Pack checkout also requires the explicit billing launch flag, engine and common Stripe configuration. |
 | `BRANCHLINE_BILLING_ENABLED` | Default false. Opt in only after real engine, SMTP and Stripe test flows succeed. Checkout also requires engine enabled. Existing customer portal/webhook reconciliation remains available when checkout is paused. |
 | `BRANCHLINE_MAX_ACTIVE_GLOBAL` | Default1, maximum2; one active run per workspace. |
 | `BRANCHLINE_MAX_ROUNDS`, `BRANCHLINE_MAX_AGENTS`, `BRANCHLINE_JOB_TIMEOUT` | Maximum20 rounds, 40 graph entities, default two-hour run deadline. |
@@ -54,17 +55,21 @@ Requests are JSON. Auth mutations require the exact app `Origin`. Signed-in cook
 | `GET /api/v1/account/export` | Account, subscription summary and all owned gateway runs/context; excludes credentials and upstream resource IDs. |
 | `DELETE /api/v1/account` | `{password}` plus CSRF. Requires password reauthentication, no active runs, no renewable subscription and no pending checkout. Revokes sessions, erases identity/gateway content, and keeps minimal encrypted references for pending remote erasure. Accounting records may remain. |
 
-Account responses contain `user:{id,email,name,email_verified}`, `workspace:{id,name}`, `credits_remaining`, `subscription:null|{plan,status,current_period_end,cancel_at_period_end,checkout_pending}` and `csrf_token`. Each account owns an isolated workspace. Free signup grants zero credits, preventing anonymous provider spending.
+Account responses contain `user:{id,email,name,email_verified}`, `workspace:{id,name}`, aggregate `credits_remaining`, `credit_wallet`, `subscription:null|{plan,status,current_period_end,cancel_at_period_end,checkout_pending}` and `csrf_token`. Each account owns an isolated workspace. The wallet exposes `banked`, `subscription`, `free`, `total`, `free_allowance`, `free_capacity`, `free_interval_hours`, `free_next_refresh_at` and `free_eligible`. Verified accounts get a capped 4-credit allowance every rolling 48 hours; unverified accounts and standalone operator workspaces get none.
+
+Free refill and reservation share an SQLite write transaction. Missed windows do not accumulate; free credits are spent before current subscription credits, then banked credits. Existing operator balances stay banked. Legacy expiring subscription balances migrate once into the period pool. Monthly renewal, cancellation and expiry never erase banked credits. A domain-separated HMAC email marker prevents deletion/recreation from resetting a 48-hour free window; only its digest and next deadline remain, without raw email or account/workspace IDs. Expired markers are purged during wallet access and minute cleanup; backups/journals have separate retention.
 
 Passwords use OpenSSL scrypt with fresh16-byte salts, N131072/r8/p1. At most two password hashes run concurrently. Opaque random sessions are SHA-256 hashed in SQLite, expire after seven days, and use Secure HttpOnly SameSite=Strict `__Host-` cookies. Localhost HTTP uses a separate development cookie name. CSRF values are session-bound HMAC tokens. Password reset/logout revoke server sessions. Rate limits precede hashing; responses do not echo passwords, provider bodies or tracebacks. Add edge rate limiting for distributed abuse; arbitrary forwarded IP headers are not trusted.
 
 ## Hosted subscriptions
 
-Server-defined plans: Solo AUD49/month with30 credits, Studio AUD199 with150, Agency AUD599 with500. Credits are workload units, not dollars or unlimited compute. Monthly credits do not roll over. Failed/interrupted attempts retain reservations because upstream work may already cost money.
+Server-defined plans: Plus (`solo`) A$9/month with90 credits, Studio A$19 with240, Pro (`agency`) A$49 with700. One-off Spark/Boost/Reserve packs cost A$4/9/19 for24/60/150 banked credits. Credits are workload units, not dollars or unlimited compute. Monthly credits do not roll over; banked top-ups and operator grants do not expire in the app. Failed/interrupted attempts retain reservations because upstream work may already cost money.
 
 `POST /api/v1/billing/checkout {plan:solo|studio|agency}` and `POST /api/v1/billing/portal {}` return `{url}` for Stripe-hosted pages. Both require a signed-in verified account, same-origin CSRF and a server-bound customer. Operator bearer tokens cannot manage billing. Checkout validates configured Stripe prices against advertised AUD amounts/monthly intervals. Persistent idempotency keys protect pending checkout; existing subscriptions use the portal.
 
-Configure snapshot webhook `POST /api/v1/billing/webhook`, API version **2025-06-30.basil**, for `checkout.session.completed`, `customer.subscription.created`, `.updated`, `.deleted`, `invoice.paid`, `invoice.payment_failed`. Raw-body HMAC signatures and five-minute timestamps are checked. Canonical Stripe resources are retrieved; one transaction deduplicates event IDs, invoice IDs and subscription periods. Only eligible paid initial/cycle invoices grant credits. Browser values, redirects and subscription-created events never grant them. Expired periods are rejected even if webhooks are delayed; revoked subscriptions cannot be revived by delayed paid snapshots. Account deletion shares the checkout lock and checks canonical billing state, preventing payment through a pending checkout after erasure.
+`POST /api/v1/billing/pack {pack:spark|boost|reserve}` uses the same signed-in/CSRF boundary and creates a server-bound one-time Checkout. A signed event retrieves the canonical paid session and line items, validates customer/user/workspace, Price kind, AUD amount and quantity, and grants banked credits once. Event, order and payment-intent uniqueness prevent replay. Pending/uncertain payments block account deletion, including after local Checkout expiry; unresolved remote outcomes, refunds and disputes require operator reconciliation. Redirects never grant credits. Public config exposes plans, packs, availability flags and the free-plan rules, without secret Price IDs.
+
+Configure snapshot webhook `POST /api/v1/billing/webhook`, API version **2025-06-30.basil**, for `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `customer.subscription.created`, `.updated`, `.deleted`, `invoice.paid`, `invoice.payment_failed`. Raw-body HMAC signatures and five-minute timestamps are checked. Canonical Stripe resources are retrieved; one transaction deduplicates event IDs, invoice IDs and subscription periods. Only eligible paid initial/cycle invoices grant monthly credits. Browser values, redirects and subscription-created events never grant them. Expired periods are rejected even if webhooks are delayed; revoked subscriptions cannot be revived by delayed paid snapshots. Account deletion shares the checkout lock and checks canonical billing state, preventing payment through a pending checkout after erasure.
 
 Use Stripe test mode first. Unit tests do not perform live billing/provider calls. Provider spending caps remain necessary: rounds, entities and workload credits cannot impose a hard dollar limit on earlier ontology/graph work.
 
@@ -74,12 +79,12 @@ Account browsers use cookie+CSRF; operator workspaces may use `Authorization: Be
 
 ```sh
 docker compose exec gateway python scripts/provision-workspace.py --name 'Operator workspace' --credits 30
-# Add --workspace-id UUID to rotate its token and replace the available allowance.
+# Add --workspace-id UUID to rotate its token and replace its banked allowance.
 ```
 
 The token grants that workspace's entire data set; do not share it between unrelated customers. Only its SHA-256 digest is stored. It is not an individual login or billing identity.
 
-`POST /api/v1/runs/quote {rounds:5}` returns `{credits_required:6,credits_remaining,sufficient}`. Authoritative reservation and job insertion share an SQLite transaction. `POST /api/v1/runs` responds202 and accepts:
+`POST /api/v1/runs/quote {rounds:5}` returns `{credits_required:6,credits_remaining,credit_wallet,sufficient}`. Authoritative reservation and job insertion share an SQLite transaction. `POST /api/v1/runs` responds202 and accepts:
 
 ```json
 {
@@ -97,6 +102,10 @@ The token grants that workspace's entire data set; do not share it between unrel
 Limits: title1–120 chars, question10–4000, context20–30000, audience1–1000, rounds1–20, retention1–30 days, body100KB. Extra fields are rejected and explicit external-processing consent is required. Graph entity count is checked before profiles. Ontology/graph costs occur before that check.
 
 `GET /api/v1/runs` returns `{runs:[...]}` for the100 most recent. `GET /api/v1/runs/{id}` returns `id,title,question,audience,rounds,template,status,stage,progress,created_at,updated_at,expires_at,credits_reserved,result,error,privacy_receipt`. Result is null or `{markdown:string}`. Render generated Markdown as escaped/sanitized content. Statuses: queued/building/preparing/running/reporting/completed/failed/interrupted. Cross-workspace IDs return404, including deletes.
+
+Runs also include a bounded `telemetry` object with observed participant/entity counts, current/total rounds, recorded action count, source, timestamps and stage timeline when available. Missing counters stay absent, not invented zeros. Process IDs, agent identities, prompts, raw errors and provider bodies are not telemetry. The animated field is a labelled illustration with a density control; its particles are not running AI agents and do not describe infrastructure capacity.
+
+`GET /api/v1/runs/{id}/brief` explicitly retrieves an owned run's original title, question, context, audience, rounds, template and privacy settings for refinement. Context stays out of ordinary list/poll responses. The response includes no prior consent; the new run requires a fresh review and consent. Cross-workspace IDs return404.
 
 Accepted jobs persist in `job_queue` and are atomically claimed. The supervisor heartbeats90-second leases. Unclaimed jobs survive restart without another deduction. Expired claimed jobs are stopped when possible and marked interrupted, **never automatically replayed** because paid work may already have started. New instances respect unexpired leases during deployment overlap. One process/instance remains supported; this is not exactly-once external execution. Operators must inspect interrupted jobs before retries. Private engine requests may continue after an HTTP timeout.
 

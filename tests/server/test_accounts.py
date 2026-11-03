@@ -82,13 +82,13 @@ def test_pilot_registration_rejects_unapproved_addresses_without_storing_or_send
         assert mailer.messages[0][0] == "owner@example.com"
 
 
-def test_signup_creates_isolated_zero_credit_account_and_secure_session(client):
+def test_signup_creates_isolated_free_account_and_secure_session(client):
     app, client = client
     response = register(client)
     assert response.status_code == 201
     result = response.json()
     assert result["user"]["email_verified"] is True
-    assert result["credits_remaining"] == 0
+    assert result["credits_remaining"] == 4
     assert "password_hash" not in response.text
     cookie = response.headers["set-cookie"]
     assert "HttpOnly" in cookie and "Secure" in cookie and "SameSite=strict" in cookie
@@ -104,7 +104,7 @@ def test_signup_creates_isolated_zero_credit_account_and_secure_session(client):
     raw = client.cookies.get(app.state.auth.cookie_name)
     assert all(raw != row[0] for row in sessions)
     quote = client.post("/api/v1/runs/quote", headers=origin(result["csrf_token"]), json={"rounds": 5})
-    assert quote.json() == {"credits_required": 6, "credits_remaining": 0, "sufficient": False}
+    assert {k: quote.json()[k] for k in ("credits_required", "credits_remaining", "sufficient")} == {"credits_required": 6, "credits_remaining": 4, "sufficient": False}
     assert client.post("/api/v1/runs", headers=origin(result["csrf_token"]), json=PAYLOAD).status_code == 429
 
 
@@ -136,6 +136,7 @@ def test_verification_mail_is_real_and_token_single_use(settings):
         assert response.status_code == 202
         assert response.json()["status"] == "verification_required"
         assert not client.cookies
+        assert app.state.auth.user(email="person@example.com")["credits"] == 0
         assert len(mailer.messages) == 1
         raw = token_from(mailer.messages[0], "verify")
         assert raw not in response.text
@@ -143,6 +144,7 @@ def test_verification_mail_is_real_and_token_single_use(settings):
         verified = client.post("/api/v1/auth/verify", headers=origin(), json={"token": raw})
         assert verified.status_code == 200
         assert verified.json()["user"]["email_verified"] is True
+        assert verified.json()["credits_remaining"] == 4
         assert client.post("/api/v1/auth/verify", headers=origin(), json={"token": raw}).status_code == 400
 
 
@@ -235,6 +237,22 @@ def test_account_deletion_rolls_back_if_cleanup_mapping_cannot_be_saved(client, 
     assert app.state.auth.user(email="person@example.com") is not None
     assert app.state.store.get(wid, rid) is not None
     assert app.state.store.cleanup_tasks() == []
+
+
+def test_deleted_email_cannot_restart_its_free_allowance(client, monkeypatch):
+    app, browser = client
+    first = register(browser).json()
+    wid = first["workspace"]["id"]
+    original_deadline = app.state.store.wallet(wid)["free_next_refresh_at"]
+    rid = app.state.store.reserve(wid, {**PAYLOAD, "rounds": 3}, 1, 1)
+    app.state.store.update(wid, rid, status="completed")
+    assert app.state.store.wallet(wid)["free"] == 0
+    deleted = browser.request("DELETE", "/api/v1/account", headers=origin(first["csrf_token"]), json={"password": PASSWORD})
+    assert deleted.status_code == 200
+    recreated = register(browser).json()
+    assert recreated["workspace"]["id"] != wid
+    assert recreated["credits_remaining"] == 0
+    assert app.state.store.wallet(recreated["workspace"]["id"])["free_next_refresh_at"] == original_deadline
 
 
 def test_engine_disabled_prevents_credit_reservation(settings):

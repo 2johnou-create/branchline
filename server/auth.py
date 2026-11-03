@@ -181,8 +181,15 @@ class Auth:
 
     def user(self, uid=None, email=None):
         with self.store.connection() as db:
-            row = db.execute("SELECT users.*,workspaces.name AS workspace_name,CASE WHEN workspaces.subscription_expires_at>0 AND workspaces.subscription_expires_at<=CAST(strftime('%s','now') AS INTEGER) THEN 0 ELSE workspaces.credits END AS credits FROM users JOIN workspaces ON workspaces.id=users.workspace_id WHERE users.disabled=0 AND workspaces.blocked=0 AND " + ("users.id=?" if uid else "users.email=?"), (uid or email,)).fetchone()
-        return dict(row) if row else None
+            row = db.execute("SELECT users.*,workspaces.name AS workspace_name FROM users JOIN workspaces ON workspaces.id=users.workspace_id WHERE users.disabled=0 AND workspaces.blocked=0 AND " + ("users.id=?" if uid else "users.email=?"), (uid or email,)).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        wallet = self.store.wallet(result["workspace_id"])
+        if wallet is None:
+            return None
+        result.update(credits=wallet["total"], credit_wallet=wallet)
+        return result
 
     def session_user(self, request):
         raw = request.cookies.get(self.cookie_name, "")
@@ -269,7 +276,7 @@ class Auth:
                     db.execute("INSERT INTO cleanup_tasks VALUES(?,?,?,?,?)", (cid, user["workspace_id"], row["id"], utcnow(), self.store.encrypt({"upstream": refs, "receipt": receipt})))
                     pending.append(cid)
             db.execute("DELETE FROM runs WHERE workspace_id=?", (user["workspace_id"],))
-            db.execute("UPDATE workspaces SET blocked=1,credits=0,token_hash=?,name='Deleted account' WHERE id=?", (token_hash(secrets.token_urlsafe(48)), user["workspace_id"]))
+            db.execute("UPDATE workspaces SET blocked=1,credits=0,subscription_credits=0,free_credits=0,free_next_refresh_at=0,token_hash=?,name='Deleted account' WHERE id=?", (token_hash(secrets.token_urlsafe(48)), user["workspace_id"]))
             db.execute("UPDATE users SET disabled=1,email=NULL,name='Deleted account',password_hash='' WHERE id=?", (user["id"],))
             db.execute("DELETE FROM sessions WHERE user_id=?", (user["id"],))
             db.execute("DELETE FROM auth_tokens WHERE user_id=?", (user["id"],))
@@ -282,3 +289,4 @@ class Auth:
             db.execute("DELETE FROM auth_tokens WHERE expires_at<?", (now,))
             # Rate-limit buckets have no bearing on account identity after 48h.
             db.execute("DELETE FROM auth_limits WHERE ((key LIKE 'register:%' OR key LIKE 'reset:%') AND window<?) OR ((key NOT LIKE 'register:%' AND key NOT LIKE 'reset:%') AND window<?)", ((now - 172800) // 3600, (now - 172800) // 60))
+            db.execute("DELETE FROM free_credit_cooldowns WHERE next_refresh_at<=?", (now,))

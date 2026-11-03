@@ -27,7 +27,7 @@ def setup(tmp_path):
 
 
 def price(plan="solo", **changes):
-    result = {"id": "price_" + plan, "currency": "aud", "unit_amount": {"solo": 4900, "studio": 19900, "agency": 59900}[plan],
+    result = {"id": "price_" + plan, "currency": "aud", "unit_amount": {"solo": 900, "studio": 1900, "agency": 4900}[plan],
               "type": "recurring", "active": True, "recurring": {"interval": "month", "interval_count": 1, "usage_type": "licensed"}}
     result.update(changes)
     return result
@@ -142,13 +142,13 @@ def test_monthly_entitlement_replay_and_distinct_event_same_invoice(setup):
     billing = Billing(settings, store, transport_for({"sub_a": sub}, {"in_a": inv}))
     bind(billing, user)
     assert run_webhook(billing, settings, event(inv))["received"]
-    assert credits(store, token) == 30
+    assert credits(store, token) == 94  # 90 monthly + the preserved banked grant
     # Spending credits must not be reversed by duplicate delivery or a second event for the same invoice.
     with store.connection(write=True) as db:
-        db.execute("UPDATE workspaces SET credits=12 WHERE id=?", (user["workspace_id"],))
+        db.execute("UPDATE workspaces SET subscription_credits=12 WHERE id=?", (user["workspace_id"],))
     assert run_webhook(billing, settings, event(inv))["duplicate"]
     run_webhook(billing, settings, event(inv, eid="evt_other"))
-    assert credits(store, token) == 12
+    assert credits(store, token) == 16
     with store.connection() as db:
         assert db.execute("SELECT count(*) FROM billing_credit_ledger").fetchone()[0] == 1
 
@@ -161,9 +161,9 @@ def test_duplicate_period_with_different_invoice_does_not_refill(setup):
     bind(billing, user)
     run_webhook(billing, settings, event(first))
     with store.connection(write=True) as db:
-        db.execute("UPDATE workspaces SET credits=10 WHERE id=?", (user["workspace_id"],))
+        db.execute("UPDATE workspaces SET subscription_credits=10 WHERE id=?", (user["workspace_id"],))
     run_webhook(billing, settings, event(duplicate, eid="evt_other"))
-    assert credits(store, token) == 10
+    assert credits(store, token) == 14
 
 
 def test_new_period_replaces_nonrollover_credits(setup):
@@ -178,10 +178,10 @@ def test_new_period_replaces_nonrollover_credits(setup):
     run_webhook(billing, settings, event(invoices["in_a"]))
     state["sub_a"] = current
     run_webhook(billing, settings, event(invoices["in_new"], eid="evt_new", created=now+1))
-    assert credits(store, token) == 150
+    assert credits(store, token) == 244
     # An older paid invoice fetched after renewal does not restore the old allowance.
     run_webhook(billing, settings, event(invoices["in_a"], eid="evt_late", created=now-1))
-    assert credits(store, token) == 150
+    assert credits(store, token) == 244
 
 
 def test_current_cancellation_cannot_be_undone_by_late_invoice(setup):
@@ -192,7 +192,7 @@ def test_current_cancellation_cannot_be_undone_by_late_invoice(setup):
     bind(billing, user)
     run_webhook(billing, settings, event(sub, kind="customer.subscription.deleted", eid="evt_cancel"))
     run_webhook(billing, settings, event(inv, created=int(time.time())-10))
-    assert credits(store, token) == 0
+    assert credits(store, token) == 4  # subscription revocation cannot erase banked credits
     assert billing.summary(user["workspace_id"])["status"] == "canceled"
 
 
@@ -203,7 +203,7 @@ def test_period_end_cancel_keeps_paid_credits(setup):
     billing = Billing(settings, store, transport_for({"sub_a": sub}, {"in_a": inv}))
     bind(billing, user)
     run_webhook(billing, settings, event(inv))
-    assert credits(store, token) == 30
+    assert credits(store, token) == 94
     assert billing.summary(user["workspace_id"])["cancel_at_period_end"]
 
 
@@ -217,9 +217,9 @@ def test_old_subscription_deletion_cannot_cancel_new_subscription(setup):
     bind(billing, user, subscription_id="sub_old", subscription_created=old["created"], status="active")
     # The cancellation notification has not arrived; canonical old-subscription fetch permits safe replacement.
     run_webhook(billing, settings, event(inv))
-    assert credits(store, token) == 30
+    assert credits(store, token) == 94
     run_webhook(billing, settings, event(old, kind="customer.subscription.deleted", eid="evt_old"))
-    assert credits(store, token) == 30
+    assert credits(store, token) == 94
     assert billing._account(user["workspace_id"])["subscription_id"] == "sub_new"
 
 
@@ -303,6 +303,13 @@ def test_checkout_rejects_wrong_price_and_unverified_user(setup):
     with pytest.raises(BillingError) as error:
         asyncio.run(billing.checkout(user, "solo"))
     assert error.value.status_code == 403
+
+
+def test_old_expensive_price_configuration_is_rejected(setup):
+    store, user, settings, _ = setup
+    billing = Billing(settings, store, httpx.MockTransport(lambda r: httpx.Response(200, json=price(unit_amount=4900))))
+    with pytest.raises(BillingError, match="configuration"):
+        asyncio.run(billing.checkout(user, "solo"))
 
 
 def test_portal_uses_bound_customer_and_provider_errors_are_safe(setup):
@@ -434,4 +441,4 @@ def test_paused_checkout_keeps_existing_portal_and_webhook_working(setup):
     assert not billing.enabled
     assert asyncio.run(billing.portal(user)).startswith("https://billing.stripe.com/")
     run_webhook(billing, settings, event(inv))
-    assert credits(store, token) == 0
+    assert credits(store, token) == 4

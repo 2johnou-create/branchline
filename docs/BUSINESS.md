@@ -8,7 +8,7 @@ Help small brand and communications teams explore how different synthetic audien
 
 Lead with **“Rehearse the decision before you launch.”** Use a separate product identity with “Powered by MiroFish” attribution. The working name and domain need availability and trademark checks before investment.
 
-The initial customer is a boutique marketing or PR agency serving several clients. Its recurring job is to assess a proposal, show alternatives, and explain the recommendation. Agencies can reuse templates across clients, giving a clearer retention mechanism than a broad consumer “predict anything” subscription. A first vertical could be Australian hospitality and consumer brands, where the founder has useful context and can recruit relevant design partners.
+The entry user is a solo founder, marketer, creator or small-business owner with a concrete decision to explore. The free personal account lets them try a short rehearsal and return with a better brief. The initial paying customer is a frequent individual user or a boutique marketing/PR practitioner who needs more depth and repeat runs. Agencies are a useful design-partner group, but shared teams and client administration remain future features. A first vertical could be Australian hospitality and consumer brands, where the founder has useful context and can recruit relevant partners.
 
 Three starter workflows:
 
@@ -20,39 +20,81 @@ Each workflow should finish with a short decision brief: scenario comparison, ob
 
 MiroFish supplies document-seeded graph construction, persona and environment preparation, social simulation, reporting, and interaction with simulated agents. Its source setup requires an OpenAI-compatible model provider and Zep credentials; it warns that simulations can consume substantial resources. These are a useful engine foundation, rather than a complete subscription service. [Upstream README](https://github.com/666ghj/MiroFish#readme)
 
-## Subscription proposal
+## Affordable free plan, subscriptions and top-ups
 
-Prices are proposed Australian dollars per month, excluding GST where applicable. Decide tax presentation and billing terms before checkout goes live. Live computation is metered; do not sell unlimited simulations.
+The launch pricing below is approved for the redesigned source release. It is not evidence that checkout is live: the deployed service remains an owner-only pilot until a sending domain, Stripe configuration and the release checks are complete. All figures are Australian dollars. Final checkout must show applicable tax and the complete charge before purchase.
 
-| Plan | Proposed price | Included monthly credits | Commercial purpose |
+| Plan | Monthly price | Compute allowance | Useful starting point |
 | --- | ---: | ---: | --- |
-| Explorer | Free | Public examples only | Learn the workflow without open-ended compute costs |
-| Solo | A$49 | 30 | One person testing focused decisions |
-| Studio | A$199 | 150 | Three seats, shared projects, scenario comparison |
-| Agency | A$599 | 500 | Ten seats, separate client workspaces, report branding |
-| Private | Quote | Contracted budget | Dedicated hosting, agreed providers and retention, support |
+| Personal | Free | 4 free credits every 48 hours, capped at 4 | Two quick one-round runs, or one three-round run, per refill window |
+| Plus | A$9 | 90 | 15 five-round runs from the monthly allocation |
+| Studio | A$19 | 240 | 40 five-round runs from the monthly allocation |
+| Pro | A$49 | 700 | 116 five-round runs, with 4 credits left, from the monthly allocation |
+| Private deployment | Quote | Contracted allocation | Separate infrastructure and an agreed processing/support configuration; a future offer |
 
-The paid seats and features in this table are a product plan, not claims about this build. Baseline security, deletion requests, and transparent processor disclosures should be available to every paid customer; charge more for the cost of dedicated infrastructure and advanced administration.
+Every verified account, including paid accounts, receives the same 4-credit free refill. Monthly allocations are additional. These are individual accounts and workspaces; plan names do not imply team seats, client administration, report branding, dedicated resources or faster queues that have not been implemented. Baseline privacy, exports and account controls are available on the free plan too.
 
-Proposed top-up: A$25 for 20 credits, explicit opt-in only. Monthly credits expire after the billing period; purchased credits expire after 12 months, subject to final terms and applicable requirements. No automatic overage billing by default. Keep account access, exports, and deletion available after compute credits run out. Cancellation stops renewal and keeps access through the paid period.
+One accepted run reserves **`1 + rounds`** workload credits. A one-round quick check costs 2; a three-round exploration costs 4; a five-round standard run costs 6. The server quotes the exact reservation before submission. A platform credit is a workload allowance, not a Zep credit, currency balance, token budget, estimate of real people represented, or guaranteed provider-invoice cap. Agent count, source length, tool calls, retries and report generation still change underlying costs. Do not sell unlimited computation.
 
-Define a credit in the billing service, separately from Zep's credit unit: initially, **one platform credit purchases a workload with up to A$0.20 of budgeted variable infrastructure and provider cost**. Quote an integer reservation before starting; stop safely at the approved budget and reconcile actual usage afterward. Reserve conservatively, return unused reserved credits, and make platform failures refundable. Separate a user cancellation from a platform failure in the published policy. Finalise credit conversion only after benchmark runs.
+### Wallet rules that users can understand
 
-Do not equate one credit with one simulation. Agent count, rounds, source length, model choice, context growth, tool calls, retries, graph ingestion, and report generation all change costs. Require caps on these inputs, per-workspace concurrency, maximum wall time, and a backend kill switch. A UI slider alone cannot enforce a spending limit.
+- The free wallet fills to **4 credits every rolling 48 hours** after verification. The next server-calculated refill time is visible. Missed windows do not accumulate; the free wallet can never exceed 4 through refills. No card, purchase or daily check-in is needed to receive a due refill.
+- Monthly subscription credits are granted once for a verified paid billing period. They do not roll over beyond that period. Renewal replaces that period's subscription allowance; it does not erase banked or free credits.
+- Purchased top-ups and operator grants are banked separately. They do not expire in this release. Existing banked balances remain banked; a free refill does not reduce or replace them.
+- Runs spend the free wallet first, then the current subscription allowance, then banked credits. The total balance and its breakdown should be visible together.
+- Refills are tied to verified accounts, not anonymous browser visits or token-only operator workspaces without a verified account. Rate, entity, round, active-run and time limits remain enforced. Deleting and recreating an account with the same verified email does not restart its current free window; a short-lived keyed marker enforces that cooldown, as disclosed in [PRIVACY.md](PRIVACY.md).
+- Checkout is opt-in. There is no automatic credit purchase or customer overage charge. Keep account access, existing reports, export and deletion available when the compute balance is empty.
 
-## Unit economics and pricing validation
+### Small one-time purchases
 
-Use this cost ledger per job:
+| Pack | One-time price | Banked credits | Five-round runs it can fund |
+| --- | ---: | ---: | ---: |
+| Spark | A$4 | 24 | 4 |
+| Boost | A$9 | 60 | 10 |
+| Reserve | A$19 | 150 | 25 |
+
+The pack discount improves with size, while subscriptions provide more credits per dollar than a similarly priced one-time purchase. A top-up suits an occasional project; a monthly plan suits regular work. Present both choices without preselecting an add-on, hiding the free refill, or implying a purchase is necessary to retrieve an existing report. Grant a pack only after server-side verification of the paid Checkout resource, with duplicate delivery protected by a persistent ledger.
+
+Cancellation, failed payments, refunds and platform-failure adjustments need clear published terms. The source does not automatically measure every provider dollar or refund every failed job. A failed or interrupted run can already have consumed provider resources; any restoration policy must match the implemented operator process.
+
+## Repeat use through useful work
+
+The repeat-use loop is **ask → rehearse → review → change one assumption → test with people → return with new evidence**. A two-day free refill creates an affordable opportunity to return; the product's value must supply the reason.
+
+1. **A first useful scenario:** offer focused templates, an example beside each field, and a local brief check for a clear question, named fictional audience, relevant context and a decision the user can act on. Describe this check as completeness guidance, not an AI assessment of research quality.
+2. **A visible next step:** finish a report with assumptions to challenge and suggested real-world questions. Make “Duplicate and change one assumption” easy. Re-review redaction, processors, cost and consent for every new live submission.
+3. **An honest credit home:** show free, monthly and banked balances, next free refill, exact run quote and an optional shorter-depth choice. A free user should be able to choose a useful run that fits the current allowance.
+4. **Progress worth watching:** use a responsive animated network, a stage timeline and real round/action counts. Clearly separate illustrative particles from measured agents. The current deployment does not execute millions of agents: it supports a bounded small simulation and one active engine run. Unknown telemetry stays unknown; partial milestones are not invented findings.
+5. **Control over drafts:** keep work in the tab by default. An unchecked “Save this draft on this device” option can support a return visit, with a clear expiry and removal control. Do not save credentials, consent or private work silently.
+6. **Experiments after launch:** evaluate opt-in refill reminders, scenario comparison and scheduled research prompts only when those features are implemented and the user chooses them. Do not send reminders merely because a free allowance refreshed.
+
+Avoid fake live counters, invented participant quotes, false scarcity, forced streaks, hidden credit expiry, or countdowns that reset to pressure a purchase. Reward clarity and repeatable decisions. Do not use time spent waiting for computation as the main engagement metric.
+
+## Unit economics and capacity validation
+
+These low prices are a launch hypothesis, not a proven margin. Keep a per-job cost ledger:
 
 `variable cost = model input + model output + graph ingestion + worker time + storage/egress + retry allowance`
 
-Measure provider tokens and bytes rather than estimating cost solely from agent count. Keep exchange rates configurable and record the rate used for the quote. Use pinned model IDs and provider/region-specific rates.
+Measure tokens, ingestion bytes, duration and provider charges for small and large supported runs. Record model/version, provider region and currency conversion used. A round count is easy to explain but is not a precise cost meter; input limits and operational controls still matter.
 
-As checked on 3 November 2026, Zep's published monthly Flex price is US$125 for 50,000 credits, with US$25 per additional 10,000; its credits depend on ingestion byte size. Treat this as a shared fixed-cost commitment plus variable ingestion, not free production infrastructure. [Zep pricing](https://www.getzep.com/pricing/)
+The configured Render baseline is approximately **US$112.75/month** before tax and overages for the existing app, private engine and disks. This is an operator-approved deployment estimate, not a new purchase or an automatic scaling budget. [Render pricing](https://render.com/pricing)
 
-Alibaba's official schedule varies model prices by region, mode, and context size. Do not base a subscription on a single headline token price or assume the upstream `qwen-plus` alias always selects the same revision. [Model Studio pricing](https://help.aliyun.com/en/model-studio/model-pricing)
+As checked on 3 November 2026, Zep publishes a prototype allowance of 10,000 provider credits per month. Its monthly Flex plan is **US$125 for 50,000 credits**, then **US$25 per 10,000**, with automatic top-ups at the 20% threshold. A Zep Episode costs one credit for each 350 bytes or part thereof; Branchline's workload credits are a different unit. If the operator chooses Flex, the illustrative shared Render-plus-Zep fixed floor becomes **US$237.75/month**, before model calls, email, tax, FX, fees, support and free-user acquisition costs. This is not a statement about the operator's current Zep invoice or an instruction to upgrade. [Zep pricing](https://www.getzep.com/pricing/)
 
-With the illustrative A$0.20 maximum variable cost per credit, full included-credit use implies A$6 cost on Solo, A$30 on Studio, and A$100 on Agency. These are budget assumptions, not measured margins: add hosting minimums, payment fees, support, tax, FX, failed jobs, and acquisition costs before assessing profitability. At 20 Studio accounts, monthly revenue would be A$3,980 before tax; this is a planning example, not a forecast. Aim for at least 70% gross margin after actual service costs, and reduce included compute or increase prices if the benchmark does not support it.
+Official OpenAI documentation lists the current compatibility model, `gpt-4o-mini`, at **US$0.15 per million input tokens** and **US$0.60 per million output tokens**. Use the account's actual model, usage and pricing when measuring jobs; do not infer a typical scenario price from these token rates alone. Verify model availability before commercial launch rather than silently migrating the pinned simulation framework. [Official GPT-4o mini documentation](https://developers.openai.com/api/docs/models/gpt-4o-mini)
+
+For a 70% gross-margin target, the following arithmetic shows the maximum cost space before allocating hosting, payment fees, support and the free tier. It is a planning ceiling, not a measured variable cost or a hard enforcement mechanism.
+
+| Plan | Revenue per included credit | 30% of revenue per included credit, before overhead |
+| --- | ---: | ---: |
+| Plus | A$0.1000 | A$0.0300 |
+| Studio | A$0.0792 | A$0.0238 |
+| Pro | A$0.0700 | A$0.0210 |
+
+Do not subtract USD costs directly from AUD sales. Use the actual settlement exchange rate and payment fees. Publish final prices only when measured p95 workload costs, failure rates, support time and the free-user subsidy fit the chosen margin. Paid plan and pack amounts can be revised before public checkout; a source-code price change must not silently change an existing customer's Stripe contract.
+
+Free use also consumes capacity. A fully used 4-credit refill every 48 hours supplies about 60 credits per 30 days, or up to 30 one-round jobs. In a purely illustrative four-minute-per-job model, one continuously available worker could finish at most 10,800 jobs in 30 days before overhead; 1,000 fully engaged free accounts could ask for 30,000 quick jobs. This is not a measured runtime or service level. Start with a bounded verified cohort, measure demand, then choose a funded capacity plan. The present global admission limit can reject an additional run while one is active; it is not a promise of an unlimited waiting queue.
 
 ## Privacy as a visible product feature
 
@@ -86,7 +128,7 @@ Build the business around dependable hosting, templates, evidence handling, work
 
 **Weeks 3–4:** benchmark at least 30 bounded jobs across the three workflows. Implement server-side authentication and workspace permissions, durable job queue, usage ledger, safe retries, cost cap, deletion workflow, and complete receipts. Test cross-account access and cancellation. Configure payment checkout and signed, idempotent webhooks in test mode before taking payment.
 
-**Weeks 5–6:** offer ten paid Studio pilots at the proposed price. Require a real decision and two scenarios per pilot. Publish permissioned case studies around saved time and discovered objections, with the limitations visible. Add annual billing only when retention is demonstrated.
+**Weeks 5–6:** after the release gates are met, offer affordable Plus/Studio pilots at the launch prices. Require a real decision and two scenarios per pilot. Publish permissioned case studies around saved time and discovered objections, with the limitations visible. Add annual billing only when retention is demonstrated.
 
 **Weeks 7–12:** prioritise scenario comparison, client workspace management, and repeatable reports. Introduce the private deployment offer only after demonstrating the whole data path and calculating its support cost. Defer a general consumer marketplace until one recurring professional workflow retains customers.
 
