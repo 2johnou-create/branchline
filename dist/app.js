@@ -86,6 +86,6 @@ $('#redact-toggle').addEventListener('change',updatePayload);
 $('#processing-consent').addEventListener('change',updatePayload);
 $('#export-report').addEventListener('click',exportReport);
 $('#brief-file').addEventListener('change',async event=>{const file=event.target.files[0];if(!file)return;if(file.size>120000){toast('Use a text brief smaller than 120 KB.');event.target.value='';return;}try{const text=await file.text();if(text.length>30000){toast('The context field is limited to 30,000 characters. Please shorten the file.');return;}$('#brief-context').value=text;toast('Brief read locally. Review it before continuing.');}catch{toast('Could not read the text file.');}finally{event.target.value='';}});
-window.addEventListener('hashchange',()=>{state.view=location.hash.slice(1)||'overview';if(!['overview','scenarios','privacy','plans','settings','account'].includes(state.view))state.view='overview';render();});
+window.addEventListener('hashchange',()=>{state.view=location.hash.slice(1)||'overview';if(!['overview','scenarios','privacy','plans','settings','account'].includes(state.view))state.view='overview';render();window.scrollTo(0,0);});
 window.addEventListener('beforeunload',()=>{clearTimeout(state.pollTimer);state.connection=null;});
 state.view=['overview','scenarios','privacy','plans','settings','account'].includes(location.hash.slice(1))?location.hash.slice(1):'overview';render();
