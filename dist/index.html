@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Branchline — a clearer workspace for rehearsing decisions with MiroFish. Explore scenarios, inspect assumptions, and keep control of your brief.">
+  <meta name="theme-color" content="#292330">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; connect-src https: http://localhost:* http://127.0.0.1:* http://[::1]:*; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Branchline — Rehearse your next move</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Workspace navigation">
+      <a class="brand" href="#overview" aria-label="Branchline home"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M8 5v22M8 15h8a8 8 0 0 0 8-8M8 23h8a8 8 0 0 0 8-8"/><circle cx="8" cy="5" r="2"/><circle cx="24" cy="7" r="2"/><circle cx="24" cy="15" r="2"/></svg><span>branchline<span class="brand-dot">.</span></span></a>
+      <div class="workspace-label"><span class="workspace-avatar">B</span><div>Your workspace<small>Decision rehearsal</small></div><span class="tiny-chevron">⌄</span></div>
+      <p class="nav-caption">WORKSPACE</p>
+      <nav>
+        <a href="#overview" data-view="overview"><span class="nav-icon" aria-hidden="true">◫</span> Overview</a>
+        <a href="#scenarios" data-view="scenarios"><span class="nav-icon" aria-hidden="true">⌘</span> My scenarios <span id="scenario-count" class="nav-count">0</span></a>
+        <a href="#privacy" data-view="privacy"><span class="nav-icon" aria-hidden="true">♧</span> Privacy centre</a>
+        <a href="#plans" data-view="plans"><span class="nav-icon" aria-hidden="true">◇</span> Plans & usage</a>
+      </nav>
+      <div class="sidebar-bottom"><div class="local-card"><div class="local-dot"></div><strong>Start with a little what if.</strong><p>Try a sample. Your next decision deserves a rehearsal.</p><button class="button sidebar-button" data-action="new">New scenario <span>↗</span></button></div><a href="#settings" class="settings-link" data-view="settings"><span class="nav-icon" aria-hidden="true">⚙</span> Workspace settings</a><div class="sidebar-footer"><span class="user-avatar">Y</span><div>Your session<small>Local demo workspace</small></div><span class="session-pill">DEMO</span></div></div>
+    </aside>
+    <div class="workspace-body">
+      <header class="topbar"><div><span class="mobile-logo">branchline.</span><span class="breadcrumb">Workspace <span>/</span> <strong id="breadcrumb-label">Overview</strong></span></div><div class="topbar-actions"><button id="connection-status" class="connection-badge" data-action="settings"><span></span> Demo · engine not connected</button><a class="source-link" href="https://github.com/2johnou-create/branchline" target="_blank" rel="noopener noreferrer">Source <span>↗</span></a></div></header>
+      <main id="main" tabindex="-1"></main>
+      <footer class="main-footer"><span>Built on <a href="https://github.com/666ghj/MiroFish" target="_blank" rel="noopener noreferrer">MiroFish</a>. Made for clearer thinking.</span><span>Synthetic scenarios, human decisions. <a href="#privacy">Privacy</a> <a href="https://github.com/2johnou-create/branchline" target="_blank" rel="noopener noreferrer">AGPL source ↗</a></span></footer>
+    </div>
+  </div>
+  <dialog id="scenario-dialog" class="scenario-dialog" aria-labelledby="scenario-heading">
+    <form id="scenario-form">
+      <div class="dialog-header"><div><p class="eyebrow" id="wizard-eyebrow">A LITTLE WHAT IF</p><h2 id="scenario-heading" tabindex="-1">Set the scene.</h2></div><button class="icon-button" type="button" data-action="close-dialog" aria-label="Close scenario builder">×</button></div>
+      <div class="wizard-progress" aria-label="Scenario steps"><span id="step-one-label" class="current">01 &nbsp; Your brief</span><span id="step-two-label">02 &nbsp; Review & privacy</span></div>
+      <div id="wizard-step-one">
+        <p class="muted dialog-intro">A clear question makes a more useful rehearsal. Start with a template or bring your own brief.</p>
+        <label>Scenario name<input id="brief-title" name="title" maxlength="120" required placeholder="e.g. A new price for our monthly membership"></label>
+        <label>The decision you want to explore<textarea id="brief-question" name="question" rows="2" minlength="10" maxlength="4000" required placeholder="What could happen if…"></textarea></label>
+        <label>Who is involved?<input id="brief-audience" name="audience" maxlength="1000" required placeholder="e.g. Existing members, new customers and our team"></label>
+        <label>Context & assumptions <span class="optional">At least 20 characters</span><textarea id="brief-context" name="context" rows="4" minlength="20" maxlength="30000" required placeholder="What is changing? What do we know? What should the simulation assume?"></textarea></label>
+        <div class="form-row"><label class="rounds-label">Simulation rounds<select id="brief-rounds" name="rounds"><option value="3">3 · Quick exploration</option><option value="5" selected>5 · Balanced rehearsal</option><option value="10">10 · Deeper exploration</option><option value="20">20 · Extended rehearsal</option></select></label><div class="upload-wrap"><input type="file" id="brief-file" accept=".txt,text/plain" hidden><button type="button" class="button button-quiet" id="import-brief">↑ Import a .txt brief</button><small>Read locally. Nothing uploaded.</small></div></div>
+        <div class="inline-note"><span>♧</span><p>Drafts stay in this tab. Review and redact before anything leaves your browser.</p></div>
+      </div>
+      <div id="wizard-step-two" hidden>
+        <div class="review-banner"><span>♧</span><div><strong>A privacy check, before you go.</strong><p>Email addresses and phone numbers can be masked locally. Review names and other identifying details yourself.</p></div></div>
+        <label class="toggle-row"><input type="checkbox" id="redact-toggle" checked><span>Mask email addresses & phone numbers</span><strong id="redaction-count">0 found</strong></label>
+        <div class="review-label">EXACT BRIEF TO BE SENT <span id="review-mode-label">LOCAL DEMO — NOT SENT</span></div>
+        <pre id="payload-preview" class="payload-preview" tabindex="0"></pre>
+        <div id="review-data-path" class="data-path"></div>
+        <label class="consent-label" id="consent-wrap" hidden><input type="checkbox" id="processing-consent"><span>I have reviewed this brief and consent to processing by the connected gateway, its configured LLM provider, and Zep Cloud.</span></label>
+        <p class="small muted" id="review-disclaimer">This opens a prewritten illustrative report. It does not analyse your brief or run MiroFish.</p>
+      </div>
+      <p id="wizard-error" class="form-error" role="alert" hidden></p>
+      <div class="dialog-footer"><button type="button" id="wizard-back" class="button button-quiet">Cancel</button><span id="wizard-footnote">Your draft stays in this tab</span><button type="submit" id="wizard-next" class="button button-dark">Review brief <span>→</span></button></div>
+    </form>
+  </dialog>
+  <dialog id="report-dialog" class="report-dialog" aria-labelledby="report-heading"><div class="report-toolbar"><span id="report-mode" class="pill">ILLUSTRATIVE SAMPLE</span><div><button id="export-report" class="button button-quiet">↓ Export report</button><button class="icon-button" data-action="close-report" aria-label="Close report">×</button></div></div><div id="report-content"></div></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

@@ -1,0 +1,59 @@
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: server.Dockerfile
+    environment:
+      BRANCHLINE_ENCRYPTION_KEY: ${BRANCHLINE_ENCRYPTION_KEY:?Set the gateway encryption key in .env}
+      BRANCHLINE_ALLOWED_ORIGINS: ${BRANCHLINE_ALLOWED_ORIGINS:?Set the exact public UI origin in .env}
+      BRANCHLINE_JOB_TIMEOUT: ${BRANCHLINE_JOB_TIMEOUT:-7200}
+      BRANCHLINE_MAX_ROUNDS: ${BRANCHLINE_MAX_ROUNDS:-20}
+      BRANCHLINE_MAX_AGENTS: ${BRANCHLINE_MAX_AGENTS:-40}
+      BRANCHLINE_DATABASE: /data/branchline.sqlite3
+      MIROFISH_BASE_URL: http://mirofish:5001
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - gateway-data:/data
+    depends_on:
+      mirofish:
+        condition: service_started
+    restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs:
+      - /tmp:uid=10001,gid=10001,mode=700
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+  mirofish:
+    build:
+      context: .
+      dockerfile: engine.Dockerfile
+    environment:
+      LLM_API_KEY: ${LLM_API_KEY:?Set the engine LLM API key in .env}
+      LLM_BASE_URL: ${LLM_BASE_URL:?Set the compatible LLM API origin in .env}
+      LLM_MODEL_NAME: ${LLM_MODEL_NAME:?Set the LLM model name in .env}
+      ZEP_API_KEY: ${ZEP_API_KEY:?Set the engine Zep API key in .env}
+      FLASK_DEBUG: "false"
+    expose:
+      - "5001"
+    volumes:
+      - engine-data:/app/backend/uploads
+    restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    tmpfs:
+      - /tmp:uid=10001,gid=10001,mode=700
+      - /app/backend/logs:uid=10001,gid=10001,mode=700
+volumes:
+  gateway-data:
+  engine-data:
+

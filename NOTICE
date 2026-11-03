@@ -1,0 +1,17 @@
+Branchline — a decision rehearsal interface for MiroFish
+Copyright (C) 2026 Branchline contributors
+
+Branchline application additions are licensed under GNU AGPL-3.0.
+The unmodified MiroFish source is included in engine/mirofish.
+Upstream: https://github.com/666ghj/MiroFish
+Upstream revision: 7657031ac01184afe2cb220f5ee3545573b5e843
+Retrieved: 3 November 2026
+
+Original copyright and licence notices remain in the vendored source.
+Branchline adds a separate browser interface, authenticated gateway,
+deployment configuration and hardened engine entrypoint. It does not
+claim affiliation with or endorsement by MiroFish's original authors.
+
+Corresponding source for this distribution, including build instructions:
+https://github.com/2johnou-create/branchline
+See LICENSE for the complete GNU AGPL version 3 licence.
