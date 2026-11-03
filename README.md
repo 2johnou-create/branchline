@@ -2,7 +2,7 @@
 
 **Rehearse your next move.** A public-facing decision rehearsal platform built around [MiroFish](https://github.com/666ghj/MiroFish).
 
-[Interface preview](https://branchline-studio.misty-jelly-1931.chatgpt.site) · [First-time setup](docs/SETUP.md) · [Deploy on Render](https://render.com/deploy?repo=https://github.com/2johnou-create/branchline) · [Business plan](docs/BUSINESS.md) · [Privacy](docs/PRIVACY.md)
+[Live owner pilot](https://branchline-app.onrender.com) · [Static demo](https://branchline-studio.misty-jelly-1931.chatgpt.site) · [Setup and remaining steps](docs/SETUP.md) · [Business plan](docs/BUSINESS.md) · [Privacy](docs/PRIVACY.md)
 
 ## Implemented application
 
@@ -15,13 +15,13 @@
 - Per-run retention, authenticated private simulation-file deletion, encrypted unresolved-cleanup records and automatic retries.
 - Responsive browser interface, safe report rendering and clearly labelled optional prewritten examples.
 
-**Deployment status:** the linked Sites address serves the interface and setup guidance. The Python app and engine require a container host plus LLM/Zep credentials. The repository includes the implementation and deployment Blueprint, but no hosting account, API balance, sender account or Stripe merchant account is created by cloning it. Live inference, email delivery and payments must be verified with the operator's accounts before customers use them. Checkout is disabled by default even when Stripe keys are configured.
+**Deployment status:** the application is deployed at [branchline-app.onrender.com](https://branchline-app.onrender.com), with its MiroFish engine running privately on Render. This is an owner-only email pilot: signup, verification, signed-in accounts and credit balances work. A real one-round test completed automatically through graph building, participant preparation, recorded simulation actions and report generation. Subscription checkout is paused. The Sites address remains a separate static demonstration. Public email delivery needs a verified sending domain; public onboarding, live cleanup verification and Stripe activation remain in [the setup guide](docs/SETUP.md). Reports use recorded output; live follow-up interviews are unavailable after the simulation closes.
 
 ## First-time setup
 
 Follow [SETUP.md](docs/SETUP.md) to create the provider accounts and configure their secrets. The Render Blueprint deploys the combined public app/API and a private engine, with persistent disks. Review Render's paid resources before approval. The private engine receives model/Zep keys; the public application receives account/email/payment settings.
 
-Normal customers sign in to the combined application URL; they do not need a gateway URL or workspace token. Advanced operator tokens remain available for pilot provisioning and live verification.
+Allowed pilot users sign in to the combined application URL; they do not need a gateway URL or workspace token. Advanced operator tokens remain available for pilot provisioning and live verification. Expanding registration beyond the owner requires a verified sender domain and an explicit change to the signup allowlist; keep allowed addresses in hosting settings rather than public source.
 
 For your own Docker host:
 

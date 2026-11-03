@@ -1,6 +1,8 @@
 # Launch status and remaining work
 
-Prepared 3 November 2026. The source now includes a full application as well as the public static demonstration. Source implementation, a successful container test, a deployed backend, and a live commercial service are different milestones. Provider accounts and production credentials have not been supplied in this build session.
+Prepared 3 November 2026. The full application is deployed at [branchline-app.onrender.com](https://branchline-app.onrender.com), with a private MiroFish engine on Render. The [Sites address](https://branchline-studio.misty-jelly-1931.chatgpt.site) remains a separate static demonstration. The deployed application is an **owner-only email pilot**, with registration restricted through an operator-configured allowlist and subscription checkout paused.
+
+A real SMTP test was delivered to the owner, and signup, email verification and sign-in have been exercised. A real one-round job completed automatically and returned a report; the engine recorded two actions and a completed round. The owner's separate run also completed. This deployment is not a public paid launch. Sender-domain verification, wider onboarding, live cleanup verification and Stripe activation remain separate steps in [SETUP.md](SETUP.md). Allowed email addresses stay in private hosting settings, not the public repository.
 
 ## Implemented in source
 
@@ -12,24 +14,24 @@ Prepared 3 November 2026. The source now includes a full application as well as 
 - An encrypted ledger for unresolved upstream cleanup, automatic retry, and operator inspection/reconciliation.
 - Docker services and a Render Blueprint that keep the engine private and preserve application and engine data on separate disks.
 
-This list describes code paths. It does not mean a live backend, SMTP sender, model provider, Zep account, or Stripe account has been configured. The static public site continues to offer local samples until a full server deployment is connected or visited.
+This list describes implemented code paths. The Render application, private engine, provider configuration and owner-pilot email path are now deployed; Stripe payment collection is not active. The static demonstration continues to offer local samples. A feature appearing in source does not by itself establish its end-to-end live verification.
 
 ## Verification boundary
 
-The remote Linux engine validation has exercised the real dependency stack, OASIS/CPU PyTorch imports, container health, and response hardening without paid inference. See the [runtime workflow](https://github.com/2johnou-create/branchline/actions/runs/41620745805). Automated gateway, account, billing, and artifact-cleanup tests use mock providers or local fixtures. They establish important contracts without proving provider credentials, deliverability, live payment settlement, or the complete hosted inference path.
+The remote Linux engine validation exercises the real dependency stack, OASIS/CPU PyTorch imports, both local and Render port binding, the structured Twitter entrypoint, container health and response hardening without paid inference. See the [runtime workflow](https://github.com/2johnou-create/branchline/actions/runs/41630429808) and [98-test source checks](https://github.com/2johnou-create/branchline/actions/runs/41630430032). A separate real one-round hosted test completed automatically with structured actions and a stored report; its receipt is retained privately at `/data/live-verification-automatic.json`. Live email delivery and account verification have also been observed. Live deletion acknowledgements, account recovery/deletion and payment settlement remain to be exercised; their automated tests use controlled fixtures.
+
+The pinned report API requires a terminal simulation. This pilot therefore reports from recorded output after the environment closes; live follow-up interviews are unavailable. Missing interview evidence must remain unverified, as explained in the report viewer. Generated output is synthetic rehearsal material, not observed customer research or a validated prediction.
 
 Refer to the current CI run and build owner's results for the exact revision and count of passing checks. Later changes require their own checks; do not infer that a previous container run covers all subsequent edits.
 
-## What the operator must supply
+## Remaining operator setup and verification
 
 Use [SETUP.md](SETUP.md) for the guided setup and [DEPLOYMENT.md](DEPLOYMENT.md) for the complete host configuration.
 
-1. A hosting workspace for the public application and private engine, with the paid resources reviewed before creation.
-2. An approved OpenAI-compatible LLM account, API base URL and model; a Zep account/key; provider budgets and an approved data-processing configuration.
-3. TLS-enabled SMTP and a verified sender/domain for verification and recovery mail.
-4. Securely retained application encryption/master secret and matching private cleanup secret, persistent encrypted volumes, backups, and an operational contact.
-5. A small, non-sensitive live test allocation and an end-to-end real simulation, including cleanup and restart behavior.
-6. Only after those checks: a Stripe test-mode setup, matching AUD monthly Prices, the pinned-version signed webhook, customer portal configuration, and verified lifecycle tests. Live keys and checkout activation are a later deliberate operator action.
+1. Confirm report/account export, recovery, deletion receipts and live upstream cleanup. The hosted inference path and persistence across deployment have been exercised; deletion acknowledgements still need live verification.
+2. Verify a sender domain and the public verification/recovery mail flows before wider onboarding. Keep the owner allowlist active until public registration is intended.
+3. Review provider budgets, permitted processing, persistent storage, backup expiry, secret recovery and the operational contact for the deployed services.
+4. After those checks, configure Stripe test mode, matching AUD monthly Prices, the pinned-version signed webhook and customer portal, then verify the billing lifecycle. Live keys and checkout activation remain a deliberate later operator action.
 
 A source repository does not create these accounts, grant paid quotas, or pay provider invoices. Keep all secrets in the selected host's secret settings, never browser code or GitHub source.
 

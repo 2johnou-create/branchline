@@ -178,7 +178,7 @@
       badge.replaceChildren(el('span'), document.createTextNode(state.discovery === 'checking' ? 'Checking service' : state.serverConfig ? 'Account not connected' : 'Application server not deployed'));
     } else if (state.connection.cookie) {
       badge.classList.add('connected');
-      badge.replaceChildren(el('span'), document.createTextNode(engineCanRun() ? 'Engine configured · live run required' : 'Engine setup required'));
+      badge.replaceChildren(el('span'), document.createTextNode(engineCanRun() ? 'Engine configured' : 'Engine setup required'));
     }
     const footer = $('.sidebar-footer');
     const text = footer?.querySelector('div');
@@ -592,6 +592,8 @@
   openReport = function(run) {
     originals.openReport(run);
     if(!run.local && run.result?.markdown && run.id !== 'receipt'){
+      const note = $('.report-note', $('#report-content'));
+      if(note)note.textContent = 'These synthetic responses are hypotheses to test with real people. This pilot uses recorded simulation output; live follow-up interviews are unavailable after the simulation closes. Missing interview evidence remains an open question.';
       const raw = $('.report-raw',$('#report-content'));
       if(raw)raw.replaceWith(safeMarkdown(run.result.markdown));
     }
