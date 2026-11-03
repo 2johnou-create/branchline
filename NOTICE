@@ -12,6 +12,9 @@ Branchline adds a separate browser interface, accounts, authenticated gateway,
 optional subscriptions, persisted jobs, deployment configuration and a hardened
 engine entrypoint with private artifact cleanup. Its container installer uses
 the matching official CPU PyTorch build with the other upstream lock versions.
+The Docker image overlays the legacy Twitter launch script with a Branchline
+shim that runs upstream's structured runner in Twitter-only mode. The shim is
+included in deploy/run_twitter_simulation.py; the vendored source is unchanged.
 It does not
 claim affiliation with or endorsement by MiroFish's original authors.
 

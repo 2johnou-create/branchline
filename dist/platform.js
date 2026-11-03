@@ -39,6 +39,9 @@
     return box;
   }
 
+  const creditNumber = new Intl.NumberFormat('en-AU');
+  function formatCredits(value) { return creditNumber.format(Number(value) || 0); }
+
   async function requestJSON(base, path, options = {}, operator = null) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 20000);
@@ -168,7 +171,7 @@
 
   function updateAccountChrome() {
     const button = $('#account-button');
-    if (button) button.textContent = state.account ? 'Account · ' + state.account.credits_remaining + ' credits' : 'Sign in';
+    if (button) button.textContent = state.account ? 'Account · ' + formatCredits(state.account.credits_remaining) + ' credits' : 'Sign in';
     const badge = $('#connection-status');
     if (!state.connection) {
       badge.classList.remove('connected');
@@ -200,7 +203,7 @@
     const metric = $$('.metric', view)[1];
     if (metric) {
       $('strong', metric).textContent = state.account ? 'Account' : state.connection ? 'Operator' : state.serverConfig ? 'Sign in' : 'Setup required';
-      $('small', metric).textContent = state.account ? state.account.credits_remaining + ' credits available' : 'Real runs need a configured server';
+      $('small', metric).textContent = state.account ? formatCredits(state.account.credits_remaining) + ' credits available' : 'Real runs need a configured server';
     }
   };
 
@@ -303,10 +306,10 @@
     const summary = el('section', 'content-card account-card');
     summary.append(el('h2', '', 'Your account at a glance'));
     if(state.authNotice)summary.append(el('div','notice',state.authNotice));
-    const balance = el('div', 'account-balance'); balance.append(el('strong', '', String(account.credits_remaining)), el('span', '', 'credits available')); summary.append(balance);
+    const balance = el('div', 'account-balance'); balance.append(el('strong', '', formatCredits(account.credits_remaining)), el('span', '', 'credits available')); summary.append(balance);
     const subscription = account.subscription;
-    summary.append(el('p', '', subscription ? 'Subscription: ' + subscription.plan + ' · ' + subscription.status : 'No active subscription. Choose a plan to fund real simulations.'));
-    summary.append(el('p', 'small muted', 'A run reserves the number of credits quoted by the server. A new account has no free inference allowance. Payment credits are granted after the server verifies Stripe’s paid-invoice webhook.'));
+    summary.append(el('p', '', subscription ? 'Subscription: ' + subscription.plan + ' · ' + subscription.status : account.credits_remaining > 0 ? 'Your available credits can fund simulations. Review each run’s quote before starting.' : state.serverConfig?.billing?.enabled ? 'Choose a plan to fund real simulations.' : 'Subscriptions are not open yet. The operator can grant pilot credits.'));
+    summary.append(el('p', 'small muted', 'Each run reserves its quoted credits. Pilot credits are granted by the operator; subscription credits arrive after payment is confirmed.'));
     const actions = el('div', 'settings-actions');
     [['plans', 'View credit plans'], ['refresh-account', 'Refresh balance'], ['portal', 'Manage subscription'], ['logout', 'Sign out']].forEach(([action, label], index) => {const b = el('button', 'button ' + (index === 0 ? 'button-dark' : 'button-outline'), label); b.dataset.accountAction = action; if(action === 'portal')b.disabled = !subscription; actions.append(b);});
     summary.append(actions);view.append(summary);
@@ -434,7 +437,7 @@
     const enabled = !!state.serverConfig?.billing?.enabled;
     view.append(heading('CREDITS FOR DELIBERATE DECISIONS', 'Room for your next what if.', enabled ? 'Monthly credit subscriptions in Australian dollars. Checkout and subscription management are hosted by Stripe.' : 'Subscriptions become available when the operator connects Stripe. No payment can be collected by this interface alone.', false));
     const usage = el('div', 'usage-strip'), copy = el('div');
-    copy.append(el('strong', '', state.account ? state.account.credits_remaining + ' credits available' : 'Sign in to fund real simulations'), el('p', '', 'The server quotes the exact credit reservation before each run. New accounts start with zero credits.'));
+    copy.append(el('strong', '', state.account ? formatCredits(state.account.credits_remaining) + ' credits available' : 'Sign in to fund real simulations'), el('p', '', 'The server quotes the exact credit reservation before each run. New accounts start with zero credits.'));
     const accountButton = el('button', 'button button-outline', state.account ? 'Account & balance' : 'Sign in');accountButton.dataset.action = 'account';usage.append(copy, accountButton);view.append(usage);
     const plans = state.serverConfig?.billing?.plans?.length ? state.serverConfig.billing.plans : [{id:'solo',name:'Solo',price_aud:49,monthly_credits:30},{id:'studio',name:'Studio',price_aud:199,monthly_credits:150},{id:'agency',name:'Agency',price_aud:599,monthly_credits:500}];
     const grid = el('div','pricing-grid live-pricing-grid');
@@ -442,7 +445,7 @@
       const card = el('section','price-card' + (plan.id === 'studio' ? ' featured' : ''));
       card.append(el('p','eyebrow',plan.name.toUpperCase()));
       const price = el('div','price','$' + plan.price_aud);price.append(el('span','',' AUD / month'));card.append(price);
-      card.append(el('p','price-description',plan.monthly_credits + ' credits per paid subscription period.'));
+      card.append(el('p','price-description',formatCredits(plan.monthly_credits) + ' credits per paid subscription period.'));
       const list = el('ul');['Private account workspace','Real MiroFish scenario workflow','Brief review & local redaction','Report export and processing receipt'].forEach(text => list.append(el('li','',text)));card.append(list);
       const current = state.account?.subscription?.plan === plan.id;
       const canManage = !!state.account?.subscription;
@@ -496,7 +499,7 @@
     costQuote.hidden = sample;
     if(!sample){
       costQuote.textContent = state.quote
-        ? 'Server quote: ' + state.quote.credits_required + ' credits reserved when you start. Available balance: ' + state.quote.credits_remaining + ' credits.' + (state.quote.sufficient ? '' : ' Add credits before starting.')
+        ? 'Server quote: ' + formatCredits(state.quote.credits_required) + ' credits reserved when you start. Available balance: ' + formatCredits(state.quote.credits_remaining) + ' credits.' + (state.quote.sufficient ? '' : ' Add credits before starting.')
         : state.quoteError ? 'Credit quote unavailable: ' + state.quoteError
         : state.quoteLoading ? 'Checking the credit reservation with the server…'
         : 'A server credit quote is required before a real run can start.';
@@ -517,11 +520,11 @@
     const action = realNextAction();
     if(action === 'account'){next.textContent = 'Sign in to continue';$('#wizard-footnote').textContent = 'Your draft stays in this tab';next.disabled = false;}
     else if(action === 'settings'){next.textContent = 'View required setup';$('#wizard-footnote').textContent = 'Real engine not available yet';next.disabled = false;}
-    else if(action === 'plans'){next.textContent = 'Add simulation credits';$('#wizard-footnote').textContent = 'Need ' + state.quote.credits_required + ' · balance ' + state.quote.credits_remaining;next.disabled = false;}
+    else if(action === 'plans'){next.textContent = 'Add simulation credits';$('#wizard-footnote').textContent = 'Need ' + formatCredits(state.quote.credits_required) + ' · balance ' + formatCredits(state.quote.credits_remaining);next.disabled = false;}
     else {
       next.textContent = state.quoteLoading ? 'Getting server quote…' : state.quoteError ? 'Retry credit quote' : 'Start real simulation';
       next.disabled = state.quoteLoading || (!state.quote && !state.quoteError);
-      $('#wizard-footnote').textContent = state.quoteError || (state.quote ? state.quote.credits_required + ' credits · balance ' + state.quote.credits_remaining : 'Checking credit reservation…');
+      $('#wizard-footnote').textContent = state.quoteError || (state.quote ? formatCredits(state.quote.credits_required) + ' credits · balance ' + formatCredits(state.quote.credits_remaining) : 'Checking credit reservation…');
       ensureQuote();
     }
   };
