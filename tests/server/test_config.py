@@ -31,6 +31,15 @@ def test_public_http_origin_is_rejected(monkeypatch):
         Settings.from_env()
 
 
+def test_pilot_email_allowlist_is_normalized(monkeypatch):
+    monkeypatch.setenv("BRANCHLINE_ENCRYPTION_KEY", "placeholder")
+    monkeypatch.setenv("BRANCHLINE_ALLOWED_ORIGINS", "https://branchline.example")
+    monkeypatch.setenv("BRANCHLINE_SIGNUP_ALLOWED_EMAILS", " Owner@Example.com, , Second@Example.com ")
+    assert Settings.from_env().signup_allowed_emails == ("owner@example.com", "second@example.com")
+    monkeypatch.delenv("BRANCHLINE_SIGNUP_ALLOWED_EMAILS")
+    assert Settings.from_env().signup_allowed_emails == ()
+
+
 def test_weak_master_secret_is_rejected(monkeypatch):
     monkeypatch.delenv("BRANCHLINE_ENCRYPTION_KEY", raising=False)
     monkeypatch.setenv("BRANCHLINE_MASTER_SECRET", "short")

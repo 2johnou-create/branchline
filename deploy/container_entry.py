@@ -13,6 +13,12 @@ import sys
 kind, *command = sys.argv[1:]
 if kind not in {"gateway", "engine"} or not command:
     raise SystemExit("Invalid application entrypoint")
+if kind == "engine":
+    from engine_boot import engine_command
+    try:
+        command = engine_command(command)
+    except ValueError:
+        raise SystemExit("Invalid engine PORT or Gunicorn bind configuration") from None
 user = pwd.getpwnam("branchline")
 roots = ["/data"] if kind == "gateway" else ["/app/backend/uploads", "/app/backend/logs"]
 os.umask(0o077)

@@ -29,18 +29,31 @@ The original engine requires Zep Cloud. Creating a local Docker volume does not 
 
 ## 3. Configure verification email
 
-Use a transactional email service with SMTP credentials and a sender you control. Verify its sending domain/sender in that provider's dashboard, then copy the provider's SMTP settings into the **public app service**:
+Resend is the initial email-provider choice. The SMTP integration is implemented; account configuration and delivery tests are still required before launch.
 
-| Variable | Meaning |
+1. Create or sign in to your own [Resend account](https://resend.com/signup) and start on its Free transactional plan. As checked on 3 November 2026, it includes 3,000 emails per month with a 100-email daily limit. Check [current pricing and limits](https://resend.com/pricing) before launch; domain registration is separate.
+2. Choose a domain you own and can edit in DNS. If you do not own one yet, register one through a registrar before public signup. The app can still use its Render web address, but you cannot verify sending ownership of `onrender.com` or `chatgpt.site`.
+3. In Resend **Domains**, add a dedicated sending subdomain such as `auth.your-domain.example`. Copy the exact DNS records Resend generates into your DNS provider, then wait until Resend shows the domain as verified. Follow its [domain verification guide](https://resend.com/docs/dashboard/domains/introduction); do not replace existing website or mailbox records with guessed values.
+4. In that domain's configuration, leave open and click tracking disabled for account verification and recovery links. Select [Enforced TLS](https://resend.com/docs/dashboard/domains/tls) for these authentication emails. With enforced delivery TLS, a recipient server that cannot accept TLS will not receive the message.
+5. Create a dedicated Resend API key named **Branchline authentication**, with sending access restricted to the verified sending domain where available. Save it privately when shown. Enter it directly into Render's secret/environment field below; do not send it in chat or commit it to the repository.
+6. In the **public `branchline-app` service's** Render Environment settings, configure these [Resend SMTP settings](https://resend.com/docs/send-with-smtp):
+
+| Variable | Resend value |
 | --- | --- |
-| `BRANCHLINE_SMTP_HOST` | Provider's SMTP hostname |
-| `BRANCHLINE_SMTP_PORT` | Usually `587` for STARTTLS, or `465` for implicit TLS |
-| `BRANCHLINE_SMTP_USERNAME` | Provider-issued SMTP username |
-| `BRANCHLINE_SMTP_PASSWORD` | Provider-issued SMTP password/API credential |
-| `BRANCHLINE_SMTP_FROM` | Your verified sender address, e.g. `accounts@your-domain.example` |
-| `BRANCHLINE_SMTP_STARTTLS` | `true` for port 587; port 465 uses implicit TLS |
+| `BRANCHLINE_SMTP_HOST` | `smtp.resend.com` |
+| `BRANCHLINE_SMTP_PORT` | `587` |
+| `BRANCHLINE_SMTP_USERNAME` | `resend` |
+| `BRANCHLINE_SMTP_PASSWORD` | Your private Resend API key |
+| `BRANCHLINE_SMTP_FROM` | `Branchline <accounts@auth.your-domain.example>` — replace with your verified sending domain |
+| `BRANCHLINE_SMTP_STARTTLS` | `true` |
 
-Keep `BRANCHLINE_REQUIRE_EMAIL_VERIFICATION=true` in production. Signup stays unavailable when required email delivery is unconfigured. A configured SMTP hostname is not proof that delivery works: register a test account, verify the received email, and test recovery. Your sender provider may require DNS changes; complete those in the provider's dashboard.
+The Blueprint already supplies port `587` and STARTTLS; its four email prompts are host, username, password, and sender. Another transactional SMTP provider can use the same variables with its own credentials.
+
+For an owner-only test before your domain is ready, Resend's `onboarding@resend.dev` sender can send only to the email associated with your Resend account. This does not support public signup. Replace it with the verified-domain sender before inviting anyone else. See [Resend's testing restriction](https://resend.com/docs/knowledge-base/403-error-resend-dev-domain).
+
+For this owner-only pilot, set `BRANCHLINE_SIGNUP_ALLOWED_EMAILS` on the public app to the email associated with your Resend account. The server rejects other registrations before storing an account or sending mail, and the interface labels registration as a private pilot. After verifying your own sender domain, remove the allowlist only when public registration is intended. Keep the allowlist in hosting settings rather than public source.
+
+Keep `BRANCHLINE_REQUIRE_EMAIL_VERIFICATION=true` in production. Signup stays unavailable when required email delivery is unconfigured. After saving settings and deploying the app, register a test account, receive and follow its verification link, then test password recovery. Once your sending domain is verified, repeat with a second address to confirm public delivery. Confirm that email links use the deployed application's exact HTTPS origin. A configured SMTP hostname or a successful container health check is not proof of delivery.
 
 ## 4. Deploy on Render
 

@@ -11,6 +11,7 @@ Follow the root deployment guide and `.env.example`. Keep secrets on the host, o
 | `BRANCHLINE_ENCRYPTION_KEY` | Persistent Fernet key. Alternatively use a cryptographically random `BRANCHLINE_MASTER_SECRET` of at least 32 characters; SHA-256 is encoded as the Fernet key. Preserve the same secret across deployments. |
 | `BRANCHLINE_DATABASE` | SQLite file, default `/data/branchline.sqlite3`; requires persistent private storage. |
 | `BRANCHLINE_PUBLIC_URL` | Exact HTTPS app origin. Falls back to platform-supplied `RENDER_EXTERNAL_URL`, then the configured CORS origin. Never derived from request Host headers. HTTP is allowed only on localhost. |
+| `BRANCHLINE_SIGNUP_ALLOWED_EMAILS` | Optional comma-separated pilot registration allowlist. Addresses are normalized to lowercase; unlisted addresses are rejected before password hashing, account creation or email delivery. Leave unset for public registration after sender-domain verification. The list is never returned by the public configuration API. |
 | `BRANCHLINE_ALLOWED_ORIGINS` | Explicit origins for optional bearer API access; defaults to the app origin. Wildcards/public HTTP origins are rejected. |
 | `BRANCHLINE_STATIC_DIRECTORY` | Frontend directory, default `dist`; mounted after API routes. |
 | `BRANCHLINE_ENGINE_ENABLED` | Default false for environment-based deployments. Explicitly permits real run reservations; this is an operator declaration, not a successful inference test. |

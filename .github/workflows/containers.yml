@@ -28,6 +28,44 @@ jobs:
       - name: Check engine API and hardening without provider calls
         run: |
           docker run --rm --network none --cap-drop ALL --cap-add CHOWN --cap-add FOWNER --cap-add SETUID --cap-add SETGID -e LLM_API_KEY=nonfunctional-ci-placeholder -e ZEP_API_KEY=nonfunctional-ci-placeholder -e BRANCHLINE_ENGINE_CLEANUP_SECRET=nonfunctional-ci-cleanup-key-32-characters branchline-engine:check python -c "import os; assert os.geteuid()==10001; import engine_entry; c=engine_entry.application.test_client(); r=c.get('/health',headers={'Origin':'https://untrusted.example'}); assert r.status_code==200; assert not any(k.lower().startswith('access-control-') for k in r.headers.keys()); assert not engine_entry.application.debug; path='/internal/branchline/simulations/sim_abcdef123456'; assert c.delete(path).status_code==403; r=c.delete(path,headers={'X-Branchline-Cleanup-Key':'nonfunctional-ci-cleanup-key-32-characters'}); assert r.status_code==200 and r.json['data']['deleted'] is True; print('Private engine health and hardening passed')"
+      - name: Verify real Gunicorn on default and Render ports
+        shell: bash
+        run: |
+          for mode in local render; do
+            port=5001
+            port_args=()
+            if [ "$mode" = render ]; then
+              port=10000
+              port_args=(-e PORT=10000)
+            fi
+            cid=$(docker run -d --network none --cap-drop ALL --cap-add CHOWN --cap-add FOWNER --cap-add SETUID --cap-add SETGID -e LLM_API_KEY=nonfunctional-ci-placeholder -e ZEP_API_KEY=nonfunctional-ci-placeholder "${port_args[@]}" branchline-engine:check)
+            trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
+            if ! docker exec -e CHECK_PORT="$port" "$cid" python -c $'import json, os, time, urllib.request\ndeadline=time.monotonic()+60\nwhile time.monotonic()<deadline:\n try:\n  with urllib.request.urlopen("http://127.0.0.1:"+os.environ["CHECK_PORT"]+"/health",timeout=2) as response:\n   assert json.load(response)["status"]=="ok"\n  break\n except (OSError, AssertionError):\n  time.sleep(1)\nelse:\n raise SystemExit("Engine listener did not become healthy")\nprint("Real Gunicorn listener passed on port",os.environ["CHECK_PORT"])'; then
+              docker logs "$cid"
+              exit 1
+            fi
+            docker rm -f "$cid" >/dev/null
+            trap - EXIT
+          done
+      - name: Verify missing provider keys produce safe boot diagnostics
+        shell: bash
+        run: |
+          if docker run --rm --network none branchline-engine:check >/tmp/engine-missing-config.log 2>&1; then
+            echo 'Engine incorrectly started without required provider configuration'
+            exit 1
+          fi
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          records = []
+          for line in Path('/tmp/engine-missing-config.log').read_text().splitlines():
+              if line.startswith('{'):
+                  records.append(json.loads(line))
+          failure = next(r for r in records if r.get('event') == 'engine_startup_failed')
+          assert failure['stage'] == 'provider_configuration'
+          assert failure['missing_keys'] == ['LLM_API_KEY', 'ZEP_API_KEY']
+          print('Safe missing-configuration diagnostic passed')
+          PY
   gateway:
     runs-on: ubuntu-latest
     timeout-minutes: 10

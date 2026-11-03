@@ -64,6 +64,24 @@ def test_default_signup_is_disabled_without_email_delivery(settings):
         assert app.state.auth.user(email="person@example.com") is None
 
 
+def test_pilot_registration_rejects_unapproved_addresses_without_storing_or_sending(settings):
+    mailer = Mailer()
+    app = create_app(replace(settings, require_email_verification=True,
+                             signup_allowed_emails=("owner@example.com",)),
+                     engine=FakeEngine(), launch_jobs=False, mailer=mailer)
+    with TestClient(app, base_url=ORIGIN) as client:
+        config = client.get("/api/v1/config")
+        assert config.json()["auth"]["signup_restricted"] is True
+        assert "owner@example.com" not in config.text
+        assert register(client, "visitor@example.com").status_code == 403
+        assert app.state.auth.user(email="visitor@example.com") is None
+        assert mailer.messages == []
+        with app.state.store.connection() as db:
+            assert db.execute("SELECT count(*) FROM workspaces").fetchone()[0] == 0
+        assert register(client, "OWNER@EXAMPLE.COM").status_code == 202
+        assert mailer.messages[0][0] == "owner@example.com"
+
+
 def test_signup_creates_isolated_zero_credit_account_and_secure_session(client):
     app, client = client
     response = register(client)

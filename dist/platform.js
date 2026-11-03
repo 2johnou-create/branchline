@@ -125,6 +125,10 @@
     return !!state.serverConfig?.auth?.signup_enabled;
   }
 
+  function authIsRestricted() {
+    return !!state.serverConfig?.auth?.signup_restricted;
+  }
+
   function readinessCard() {
     const card = el('section', 'readiness-card');
     const copy = el('div');
@@ -141,9 +145,11 @@
       description = 'Account features can be available, but real runs remain disabled until the operator configures the engine and its LLM and Zep providers.';
       actionLabel = 'View setup readiness'; action = 'settings';
     } else if (!state.connection) {
-      title = 'Your next rehearsal starts with an account.';
-      description = 'Sign in, choose a credit plan, and review your brief before starting. Engine setup is declared configured; live inference has not yet been verified.';
-      actionLabel = 'Sign in or create account'; action = 'account';
+      title = authIsRestricted() ? 'Branchline is in a private pilot.' : 'Your next rehearsal starts with an account.';
+      description = authIsRestricted()
+        ? 'Registration is limited to approved pilot addresses. Sign in to your pilot account to continue. Engine configuration still needs a successful live run to be verified.'
+        : 'Sign in, choose a credit plan, and review your brief before starting. Engine setup is declared configured; live inference has not yet been verified.';
+      actionLabel = authIsRestricted() ? 'Pilot account sign in' : 'Sign in or create account'; action = 'account';
     } else {
       title = 'Your workspace is connected.';
       description = 'Real runs use your credit balance and external processors. The engine’s first successful run verifies live inference; configured status alone does not.';
@@ -230,7 +236,7 @@
       setup.append(el('h2', '', 'Service readiness'));
       const checks = [
         ['Application server', true, 'Same-origin account API detected.'],
-        ['Account registration', authCanRegister(), authCanRegister() ? 'Registration is enabled.' : 'Registration is unavailable. Check the email verification and SMTP configuration.'],
+        ['Account registration', authCanRegister(), authCanRegister() ? (authIsRestricted() ? 'Private pilot: registration is limited to approved pilot addresses. Public signup is not open.' : 'Registration is enabled.') : 'Registration is unavailable. Check the email verification and SMTP configuration.'],
         ['Verification email delivery', !!state.serverConfig.auth.email_delivery_ready, state.serverConfig.auth.email_verification_required ? 'Verification is required. Configured SMTP does not prove email delivery.' : 'Email verification is disabled by the operator.'],
         ['Simulation engine', !!state.serverConfig.engine.configured, 'Operator-declared configuration. Live provider credentials and inference are not verified by this check.'],
         ['Subscription payments', !!state.serverConfig.billing.enabled, state.serverConfig.billing.enabled ? 'Stripe checkout is configured. Credits arrive after a verified paid-invoice webhook.' : 'Stripe checkout is unavailable until billing keys, prices, and webhooks are configured.']
@@ -260,7 +266,7 @@
     const registering = state.authMode === 'register';
     const forgot = state.authMode === 'forgot';
     const verifying = state.authMode === 'verify';
-    view.append(heading('YOUR BRANCHLINE ACCOUNT', resetting ? 'Choose a new password.' : verifying ? 'Verifying your email.' : forgot ? 'Let’s get you back in.' : registering ? 'Make room for what if.' : 'Welcome back.', 'Your session uses a secure, HttpOnly cookie. Passwords and session tokens are never saved by this interface.', false));
+    view.append(heading('YOUR BRANCHLINE ACCOUNT', resetting ? 'Choose a new password.' : verifying ? 'Verifying your email.' : forgot ? 'Let’s get you back in.' : registering ? (authIsRestricted() ? 'Join the private pilot.' : 'Make room for what if.') : 'Welcome back.', 'Your session uses a secure, HttpOnly cookie. Passwords and session tokens are never saved by this interface.', false));
     if (!state.serverConfig) { view.append(readinessCard()); return; }
     const card = el('section', 'content-card account-card');
     if (state.authNotice) card.append(el('div', 'notice', state.authNotice));
@@ -274,11 +280,16 @@
       card.append(el('h2', '', 'Registration is not open yet.'), el('p', '', 'The operator needs to enable signup and configure email delivery when verification is required. Existing accounts can still sign in.'));
       const b = el('button', 'button button-outline', 'View service readiness'); b.dataset.action = 'settings'; card.append(b); view.append(card); return;
     }
+    if (registering && authIsRestricted()) {
+      const notice = el('div', 'notice');
+      notice.append(el('strong', '', 'Private pilot. '), document.createTextNode('Registration is limited to approved pilot addresses. Public signup is not open.'));
+      card.append(notice);
+    }
     const form = el('form'); form.id = 'account-auth-form';
     if (registering) form.innerHTML += '<label>Your name<input name="name" required minlength="1" maxlength="120" autocomplete="name" placeholder="Alex Morgan"></label>';
     if (!resetting) form.innerHTML += '<label>Email address<input type="email" name="email" required maxlength="254" autocomplete="email" placeholder="you@company.com"></label>';
     if (!forgot) form.innerHTML += '<label>Password<input type="password" name="password" required minlength="12" maxlength="128" autocomplete="' + (registering || resetting ? 'new-password' : 'current-password') + '" placeholder="At least 12 characters"></label>';
-    if (registering) form.append(el('p', 'small muted', state.serverConfig.auth.email_verification_required ? 'We will send a verification link. New accounts start with zero credits; choose a plan before making a real run.' : 'The operator has disabled email verification. New accounts start with zero credits.'));
+    if (registering) form.append(el('p', 'small muted', state.serverConfig.auth.email_verification_required ? (authIsRestricted() ? 'We will send a verification link to an approved pilot address. New accounts start with zero credits; the operator can grant a pilot allowance.' : 'We will send a verification link. New accounts start with zero credits; choose a plan before making a real run.') : 'The operator has disabled email verification. New accounts start with zero credits.'));
     const submit = el('button', 'button button-dark', resetting ? 'Set new password' : forgot ? 'Send reset link' : registering ? 'Create account' : 'Sign in'); submit.type = 'submit'; form.append(submit, errorBox('auth-error'));
     if (!registering && !resetting && !forgot) {const b = el('button', 'button button-quiet', 'Forgot your password?'); b.type = 'button'; b.dataset.authMode = 'forgot'; form.append(b);}
     if (forgot || resetting) {const b = el('button', 'button button-quiet', 'Back to sign in'); b.type = 'button'; b.dataset.authMode = 'login'; form.append(b);}

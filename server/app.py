@@ -248,6 +248,7 @@ def create_app(settings=None, *, engine=None, launch_jobs=True, mailer=None, bil
     @app.get("/api/v1/config")
     async def public_config():
         return {"mode": "selfhost", "auth": {"enabled": True, "signup_enabled": auth.signup_enabled,
+                "signup_restricted": bool(settings.signup_allowed_emails),
                 "email_verification_required": settings.require_email_verification, "email_delivery_ready": auth.mailer.ready},
                 "billing": {"enabled": billing.enabled, "plans": billing.plans},
                 "engine": {"configured": settings.engine_enabled, "verified": False}}
@@ -258,6 +259,8 @@ def create_app(settings=None, *, engine=None, launch_jobs=True, mailer=None, bil
         auth.limit(request, "register", body.email, count=3, seconds=3600, ip_count=30)
         if not auth.signup_enabled:
             raise HTTPException(503, "Account registration requires configured verification email delivery")
+        if settings.signup_allowed_emails and body.email not in settings.signup_allowed_emails:
+            raise HTTPException(403, "Registration is limited to approved pilot email addresses.")
         encoded = await auth.password_work(hash_password, body.password)
         user = auth.create_user(body, encoded)
         if settings.require_email_verification:

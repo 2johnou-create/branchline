@@ -3,30 +3,39 @@
 The gateway is the public boundary. This server must stay on the private
 container network. Engine artifacts still need encrypted operator storage.
 """
-import logging
 import os
+from engine_boot import configure_private_logging, startup_failed, validate_provider_environment
 
-# Upstream's default DEBUG file logger includes raw request bodies. Disable
-# Python logging before importing it rather than retaining customer prompts.
-# Engine subprocess artifacts are separate and are disclosed in PRIVACY.md.
-logging.disable(logging.CRITICAL)
+# Upstream DEBUG handlers include request bodies. Preserve supervisor events
+# while suppressing app/provider logs; use explicit safe boot diagnostics.
+configure_private_logging()
 os.environ["FLASK_DEBUG"] = "False"
 
-from app import create_app  # noqa: E402
-from app.config import Config  # noqa: E402
+stage = "provider_configuration"
+try:
+    # Fail before expensive simulation imports, naming missing keys only.
+    validate_provider_environment()
+    stage = "application_import"
+    from app import create_app  # noqa: E402
+    from app.config import Config  # noqa: E402
 
-if Config.validate():
-    raise RuntimeError("MiroFish provider configuration is incomplete.")
+    stage = "configuration_validation"
+    if Config.validate():
+        raise RuntimeError("MiroFish provider configuration is incomplete")
 
-application = create_app()
-application.config.update(DEBUG=False, TESTING=False, MAX_CONTENT_LENGTH=131072)
+    stage = "application_factory"
+    application = create_app()
+    application.config.update(DEBUG=False, TESTING=False, MAX_CONTENT_LENGTH=131072)
 
-from engine_cleanup import register_cleanup  # noqa: E402
-from app.models.task import TaskManager  # noqa: E402
-from app.services.simulation_runner import SimulationRunner  # noqa: E402
+    stage = "cleanup_registration"
+    from engine_cleanup import register_cleanup  # noqa: E402
+    from app.models.task import TaskManager  # noqa: E402
+    from app.services.simulation_runner import SimulationRunner  # noqa: E402
 
-register_cleanup(application, SimulationRunner.RUN_STATE_DIR, SimulationRunner,
-                 TaskManager(), os.environ.get("BRANCHLINE_ENGINE_CLEANUP_SECRET", ""))
+    register_cleanup(application, SimulationRunner.RUN_STATE_DIR, SimulationRunner,
+                     TaskManager(), os.environ.get("BRANCHLINE_ENGINE_CLEANUP_SECRET", ""))
+except Exception as error:
+    startup_failed(stage, error)
 
 # The engine is reached server-to-server, never by a browser. Override the
 # upstream wildcard CORS response without altering the vendored project.

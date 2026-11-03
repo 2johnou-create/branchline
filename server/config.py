@@ -24,6 +24,7 @@ class Settings:
     static_directory: str = "dist"
     engine_enabled: bool = True
     require_email_verification: bool = True
+    signup_allowed_emails: tuple[str, ...] = ()
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_username: str = ""
@@ -82,6 +83,7 @@ class Settings:
             public_url=public_url, static_directory=os.environ.get("BRANCHLINE_STATIC_DIRECTORY", "dist"),
             engine_enabled=os.environ.get("BRANCHLINE_ENGINE_ENABLED", "false").lower() == "true",
             require_email_verification=os.environ.get("BRANCHLINE_REQUIRE_EMAIL_VERIFICATION", "true").lower() != "false",
+            signup_allowed_emails=tuple(address.strip().lower() for address in os.environ.get("BRANCHLINE_SIGNUP_ALLOWED_EMAILS", "").split(",") if address.strip()),
             smtp_host=os.environ.get("BRANCHLINE_SMTP_HOST", ""),
             smtp_port=int(os.environ.get("BRANCHLINE_SMTP_PORT", "587")),
             smtp_username=os.environ.get("BRANCHLINE_SMTP_USERNAME", ""),

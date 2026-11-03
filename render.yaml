@@ -25,6 +25,8 @@ services:
         sync: false
       - key: FLASK_DEBUG
         value: 'false'
+      - key: PORT
+        value: '10000'
       - key: BRANCHLINE_ENGINE_CLEANUP_SECRET
         generateValue: true
   - type: web
