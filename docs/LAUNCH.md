@@ -1,76 +1,64 @@
 # Launch status and remaining work
 
-Prepared 3 November 2026. This is a launch guide for the actual pilot architecture, not a claim that every item below has been completed. Native hosting and GitHub results reported by the build owner determine the current public URL and repository state.
+Prepared 3 November 2026. The source now includes a full application as well as the public static demonstration. Source implementation, a successful container test, a deployed backend, and a live commercial service are different milestones. Provider accounts and production credentials have not been supplied in this build session.
 
-## What this build is
+## Implemented in source
 
-Branchline is a new interface around a pinned, vendored copy of MiroFish. The public interface can be used as a browser demonstration without provider credentials. It provides a guided brief, local common-pattern redaction, a submission preview, illustrative reports, export, privacy explanations, and proposed plans.
+- A guided brief, local email/phone-pattern redaction, exact submission preview, workload-credit quote, live status, report rendering/export, and visibly labelled illustrative samples.
+- Same-origin email/password accounts with email verification, password reset, server-side sessions in HttpOnly cookies, CSRF protection, sign-out, account export, and password-confirmed account deletion. Registration requires configured verification mail by default.
+- A workspace-scoped gateway with encrypted request/report fields, request and active-job limits, server-enforced round/entity limits, credit reservations, and a persisted SQLite job queue managed by one application process.
+- A private MiroFish adapter for the real graph/preparation/simulation/report flow. The hardened wrapper suppresses standard Python request logging and adds authenticated, bounded simulation-directory cleanup.
+- Optional server-configured Stripe hosted Checkout and customer portal, raw-body signed webhooks, current-resource reconciliation, event/invoice/period deduplication, monthly non-rollover allocations, expiry, and cancellation handling.
+- An encrypted ledger for unresolved upstream cleanup, automatic retry, and operator inspection/reconciliation.
+- Docker services and a Render Blueprint that keep the engine private and preserve application and engine data on separate disks.
 
-The separate FastAPI gateway provides operator-provisioned workspace authentication, workspace-scoped runs, encrypted request/report fields in SQLite, workload quotas, live job orchestration through a private engine, status polling, and best-effort cleanup receipts. The backend is a **single-process pilot**: run one gateway worker. SQLite persists state, but job execution uses in-process tasks. A restart marks unfinished runs interrupted rather than replaying them silently.
+This list describes code paths. It does not mean a live backend, SMTP sender, model provider, Zep account, or Stripe account has been configured. The static public site continues to offer local samples until a full server deployment is connected or visited.
 
-The private engine wrapper disables standard Python logging and removes engine browser CORS headers without modifying the vendored engine. Engine simulation artifacts still require encrypted host volumes and an operator cleanup procedure.
+## Verification boundary
 
-## Public demo versus live service
+The remote Linux engine validation has exercised the real dependency stack, OASIS/CPU PyTorch imports, container health, and response hardening without paid inference. See the [runtime workflow](https://github.com/2johnou-create/branchline/actions/runs/41620745805). Automated gateway, account, billing, and artifact-cleanup tests use mock providers or local fixtures. They establish important contracts without proving provider credentials, deliverability, live payment settlement, or the complete hosted inference path.
 
-| Capability | Public browser demo | Connected pilot |
-| --- | --- | --- |
-| Open the interface and examples | Available once the static interface is deployed | Same interface |
-| Analyse a supplied brief | No; sample reports are prewritten | Requires reachable configured gateway, private engine, and provider credentials |
-| Save server-side runs | No | Workspace-scoped encrypted content in SQLite |
-| User signup and identity management | Not implemented | Operator-provisioned shared workspace bearer token |
-| Self-service checkout or subscription renewal | Not implemented | Not implemented |
-| Automatic complete deletion of all copies | Not provided | Gateway deletion plus best-effort upstream requests; operator/provider copies have separate handling |
-| Measured provider-cost billing | Not implemented | Pilot formula is one plus the selected round count |
-| High-availability, durable distributed jobs | Not implemented | Single-process pilot only |
+Refer to the current CI run and build owner's results for the exact revision and count of passing checks. Later changes require their own checks; do not infer that a previous container run covers all subsequent edits.
 
-Do not open paid subscriptions on the strength of a working public demo alone.
+## What the operator must supply
 
-## Connect a live pilot
+Use [SETUP.md](SETUP.md) for the guided setup and [DEPLOYMENT.md](DEPLOYMENT.md) for the complete host configuration.
 
-1. **Choose infrastructure the operator controls.** Host the gateway and engine as long-running container services with private network connectivity. Static hosting alone cannot execute the Python simulation workload. Use TLS for the public gateway. Keep the MiroFish engine port private.
-2. **Set provider configuration securely.** Supply an OpenAI-compatible LLM key, base URL, pinned model revision where supported, and a Zep API key. Check the provider regions, account terms, budgets, and retention. Enter secrets into the host's secret manager or environment; do not commit them or place them in frontend settings.
-3. **Set gateway configuration.** Provide `BRANCHLINE_ENCRYPTION_KEY`, a persistent `BRANCHLINE_DATABASE` path, exact `BRANCHLINE_ALLOWED_ORIGINS`, and a server-controlled `MIROFISH_BASE_URL`. Review `BRANCHLINE_MAX_ROUNDS`, `BRANCHLINE_MAX_AGENTS`, and `BRANCHLINE_JOB_TIMEOUT` for the intended pilot. The checked code caps configured rounds at 20 and entities at 40.
-4. **Prepare data operations.** Use encrypted volumes for gateway storage and all engine artifacts. Set permissions, backup expiry, recovery, and deletion responsibilities. Gateway field encryption does not cover plaintext engine files or every metadata column. Follow [PRIVACY.md](./PRIVACY.md).
-5. **Provision a pilot workspace.** Follow the [gateway operating guide](../server/README.md#start), using `docker compose exec gateway python scripts/provision-workspace.py --name 'My pilot workspace' --credits 30` to create a unique token and bounded credit balance. Share that token through a suitable private channel. Keep different clients in different workspaces. Token rotation replaces workspace access; it does not create a per-person identity system.
-6. **Connect the interface.** Configure the HTTPS gateway URL and workspace token in Workspace settings. Confirm capabilities and current limits before enabling a live submission. The connection belongs to the current tab session; users need to protect the token.
-7. **Run a non-sensitive end-to-end rehearsal.** Verify graph creation, participant preparation, round limits, report generation, status display, export, and cleanup. The build can be tested against a mocked engine without proving that real provider credentials or the hosted live path work.
+1. A hosting workspace for the public application and private engine, with the paid resources reviewed before creation.
+2. An approved OpenAI-compatible LLM account, API base URL and model; a Zep account/key; provider budgets and an approved data-processing configuration.
+3. TLS-enabled SMTP and a verified sender/domain for verification and recovery mail.
+4. Securely retained application encryption/master secret and matching private cleanup secret, persistent encrypted volumes, backups, and an operational contact.
+5. A small, non-sensitive live test allocation and an end-to-end real simulation, including cleanup and restart behavior.
+6. Only after those checks: a Stripe test-mode setup, matching AUD monthly Prices, the pinned-version signed webhook, customer portal configuration, and verified lifecycle tests. Live keys and checkout activation are a later deliberate operator action.
 
-Hosting and paid API use can incur costs. The operator must choose and configure the infrastructure and provider accounts; a source repository does not create those accounts or pay their invoices.
+A source repository does not create these accounts, grant paid quotas, or pay provider invoices. Keep all secrets in the selected host's secret settings, never browser code or GitHub source.
 
-## Pilot operating limits
+## Subscription activation gate
 
-The current credit formula is **1 + rounds**. Credits are deducted when a run is accepted. It is a workload quota, not a financial invoice, exact dollar quote, token meter, or automatic refund ledger. The business proposal's cost-based credit design is future work.
+The implemented plans use Solo A$49/month for 30 workload credits, Studio A$199/month for 150, and Agency A$599/month for 500. A run consumes `1 + rounds`; this is a disclosed workload quota, not a precise provider-cost meter. The broader multi-seat/client-management features in [BUSINESS.md](BUSINESS.md) remain product proposals; this release gives an individual account one workspace, without team invitations or role administration.
 
-Entity limits are checked after graph construction; a rejected large graph can already have used provider resources. Round and time limits help bound work but do not guarantee a hard provider-spend cap, especially during preparation, reporting, retries, or incomplete upstream stopping. Set provider-side budgets and alerts, monitor job cost, and establish an operator stop/cleanup procedure.
+Checkout requires complete Stripe configuration plus `BRANCHLINE_BILLING_ENABLED=true` and an enabled engine. The launch flag is off by default. It is a manual attestation that setup and tests are complete, not an automatic live-engine certification. Existing configured webhooks and the customer portal remain usable when new checkout is paused.
 
-Test restart and timeout behavior before onboarding customers. Interrupted tasks can leave engine work or artifacts requiring review. Do not scale the supplied gateway with multiple workers or instances sharing the same SQLite pilot database and in-process task model.
+Before setting live keys and enabling checkout, verify test signup/mail/reset, checkout, invoice-paid allocation, duplicate delivery, renewal, failed payment, end-of-period cancellation, immediate cancellation, credit expiry, and account deletion after billing ends. Keep portal plan-switching/prorations disabled until a supported migration policy is implemented; update/proration invoices do not refill the allowance.
 
-## Before accepting payment
+Finish business identity, supported territories, tax presentation/collection, terms, cancellation/refund policy, support contact, and truthful processor/retention information. The module does not automatically collect tax, refund failed simulations, or measure every provider dollar. Credits are reserved on acceptance; failed/interrupted attempts can already have incurred upstream cost and require operator review/adjustment. Never sell unlimited simulation compute.
 
-The proposed business plans are Solo A$49/month, Studio A$199/month, and Agency A$599/month. Prices, included credits, seats, and features in [BUSINESS.md](./BUSINESS.md) are a commercial proposal. The app must clearly label plans as proposed and avoid an active-looking purchase path until checkout is implemented.
+## Operating model and limits
 
-Complete these items before charging:
+The app uses one instance and one process. SQLite persists queued jobs; a restart can resume unclaimed work, while already claimed work becomes interrupted and is not replayed automatically. This avoids a blind second paid engine call but requires operator review of partial upstream work. The queue is not a multi-host high-availability system.
 
-- Select the actual contracting business, supported customers, currency, tax treatment, refund policy, cancellation terms, and support contact.
-- Implement user accounts and workspace membership, token revocation, roles where needed, and administrative recovery. Keep tenant authorization enforced on the server.
-- Add a durable job queue and worker lifecycle if reliability or scale goes beyond a managed pilot. Specify idempotency, retries, cancellation, reconciliation, and recovery from partial engine failures.
-- Record actual provider usage and cost; benchmark realistic workloads; implement explicit credit reservations, reconciliation, failure refunds, and enforceable budget limits before marketing compute allowances.
-- Configure payment checkout in test mode, signed and idempotent webhooks, entitlement updates, renewal failures, customer cancellation, and billing history. Verify the full lifecycle before live keys are enabled.
-- Publish accurate privacy, processor, retention, export, deletion, and backup information. Implement monitoring and an auditable path for pending cleanup rather than equating a local row deletion with full erasure.
-- Complete the release verification below and document the live provider configuration. Keep a rollback and customer incident contact path.
+Entity limits apply after graph building, so a rejected graph can have consumed resources. Timeouts and stop requests cannot guarantee cancellation of every upstream preparation/report operation. Set provider budgets, alerts, bounded initial workloads, and an operator procedure for incomplete runs. Benchmark actual costs, memory, duration, and failure rates before widening the initial limits or promising completion times.
 
-## Release verification
+Run deletion attempts gateway, report, project/graph, and simulation-directory cleanup. If the engine is busy or a remote deletion fails, minimal encrypted resource references remain in the cleanup ledger. The hardened simulation cleanup route requires the shared secret and refuses active producers and unsafe identifiers. Neither its acknowledgement nor account deletion erases remote provider backups or downloaded report copies.
 
-Verify the public interface on desktop and mobile, keyboard navigation, dialog focus, sample labels, safe report rendering, local redaction limits, export, and disconnected/error states. Check that demo mode makes no live-run claim and that subscription controls do not imply billing is enabled.
+## Final release checks
 
-For the live gateway, verify unauthenticated access denial; workspace A cannot read or delete workspace B's run; malformed inputs do not echo confidential content; quotas apply atomically; non-allowed origins are not granted browser access; a failed or timed-out job produces a safe message; and deletion reports unresolved upstream cleanup truthfully. Confirm provider keys and real customer data are absent from Git history and static assets.
+Check desktop/mobile layout, keyboard navigation, focus handling, sample labels, safe handling of generated Markdown, redaction limits, report export, account states, and useful disconnected/error messages. In the static demo, do not imply that signup, checkout, or submitted-brief analysis is running.
 
-Test live cleanup using known non-sensitive IDs. Verify the project and graph path, report path, manual simulation-artifact removal, gateway retention, and backup-expiry procedure. Check the encrypted pending-cleanup ledger with `python -m server.cleanup --list`, retry supported remote operations, and resolve tasks only after manual verification. Keep the provider's retention boundary visible to customers.
+For the application, verify unauthenticated access denial; one workspace cannot access another's runs; user-supplied IDs cannot change the billing customer or price; replayed invoices cannot refill spent credits; expired/deleted accounts cannot resume computation; malformed inputs avoid confidential echoes; secrets remain out of static assets and Git history; and account deletion is serialized against new checkout.
 
-## Open-source release
-
-Retain upstream notices and the AGPL licence, identify the product's modifications, and keep the Source link pointing to the Corresponding Source for the version being served. The repository should contain code and configuration examples, not customer documents, tokens, provider keys, runtime databases, or generated simulation data. Review dependency obligations before a commercial release. The current architecture does not establish an exemption from AGPL obligations through API separation.
+Use known non-sensitive resource IDs to verify remote cleanup, deletion retry, expiry, account export, and backup/recovery procedures. Confirm actual provider regions and retention before publishing claims. Keep the AGPL source link working for the exact served version and preserve upstream notices.
 
 ## First commercial milestone
 
-Use five design partners and one repeatable agency workflow before adding broad features. Measure useful decision briefs, real-world validation, repeat usage, successful job rate, completion time, actual job cost, support time, and retention. Sell the value of clearer decisions and managed private infrastructure; do not guarantee future outcomes or present synthetic people as actual survey respondents.
+Start with five design partners and one recurring agency workflow. Measure useful decision briefs, real-world validation, repeat usage, successful-job rate, duration, actual job cost, support time, and retention. Sell clearer decisions and dependable managed infrastructure. Synthetic participants and simulated percentages are not actual survey respondents, population estimates, or guaranteed forecasts.

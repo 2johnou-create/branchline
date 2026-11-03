@@ -9,7 +9,11 @@ COPY deploy/install_engine.py /opt/branchline/install_engine.py
 RUN UV_NO_CACHE=1 python /opt/branchline/install_engine.py
 COPY engine/mirofish/locales/ /app/locales/
 COPY deploy/engine_entry.py ./engine_entry.py
-RUN useradd --create-home --uid 10001 branchline \
+COPY deploy/engine_cleanup.py ./engine_cleanup.py
+RUN useradd --create-home --uid 10001 --shell /bin/sh branchline \
+    && mkdir -p /home/branchline/.ssh \
+    && chmod 700 /home/branchline/.ssh \
+    && chown -R branchline:branchline /home/branchline/.ssh \
     && mkdir -p uploads logs \
     && chown -R branchline:branchline /app
 ENV PATH="/app/backend/.venv/bin:$PATH" \
@@ -18,6 +22,7 @@ ENV PATH="/app/backend/.venv/bin:$PATH" \
     TOKENIZERS_PARALLELISM=false \
     OMP_NUM_THREADS=2 \
     FLASK_DEBUG=False
-USER branchline
+COPY deploy/container_entry.py /opt/branchline/container_entry.py
 EXPOSE 5001
+ENTRYPOINT ["python", "/opt/branchline/container_entry.py", "engine"]
 CMD ["gunicorn", "--bind", "0.0.0.0:5001", "--workers", "1", "--worker-class", "gthread", "--threads", "8", "--timeout", "120", "--access-logfile", "/dev/null", "--error-logfile", "-", "engine_entry:application"]

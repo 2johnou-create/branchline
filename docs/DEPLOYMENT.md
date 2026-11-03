@@ -1,30 +1,69 @@
-# Deploying Branchline
+# Deploying the full Branchline platform
 
-The public interface and the compute service have different hosting requirements. The interface is already configured as a static Sites deployment. The engine needs a persistent Docker host and provider credentials; it is not running on the static host.
+The repository contains a static demonstration and a separate full application. The full application serves the interface and authenticated API from one HTTPS origin, with MiroFish running as a private service. The static demonstration cannot host Python jobs, account sessions, email delivery, or Stripe webhooks.
 
-## Static interface
+Start with [SETUP.md](SETUP.md) for account creation and provider setup. This guide explains the deployment architecture and operating requirements. Deploying paid infrastructure or activating live payment collection remains the operator's choice.
 
-Serve the contents of `dist/` on HTTPS. No build step, frontend credentials or database are required. The interface starts in sample mode and makes no engine calls until someone connects a workspace. Its source link points to the public repository. Sites uses `.openai/hosting.json` to select `dist/` for this project.
+## Recommended Render topology
 
-## Connected pilot
+Use the repository-root `render.yaml` Blueprint. It declares the application and engine as separate single-instance Docker services in Singapore:
 
-1. Clone `https://github.com/2johnou-create/branchline.git` on an operator-controlled Docker host. Choose an encrypted persistent disk and restrict operator access. Do not store customer source material in the Git checkout or source repository.
-2. Copy `.env.example` to `.env`. Set LLM/Zep keys on the server, configure the exact browser origin and generate the gateway encryption key. Keep an independently protected backup of the encryption key.
-3. Build with `docker compose build`. The first build downloads the upstream Python simulation stack and can be substantial. This build has not been executed in the authoring environment because Docker is unavailable there.
-4. Start with `docker compose up -d`. Check `docker compose ps` and `docker compose logs --tail=50 gateway`. The public `/health` checks gateway liveness only. Keep logs restricted and never paste logs containing secrets or customer content into public issues.
-5. Put an HTTPS reverse proxy on an API hostname of your choice, forwarding only to `127.0.0.1:8080`. Configure a 100 KB request limit and redact Authorization headers from access logs. Do not publish engine port 5001 or expose Docker's daemon.
-6. Provision a workspace with `docker compose exec gateway python scripts/provision-workspace.py --name 'Pilot workspace' --credits 30`. Store the issued token securely. Issue a separate token/workspace for each unrelated customer.
-7. Open Branchline Settings and connect the HTTPS API URL and workspace token. Submit an explicitly non-confidential brief with one round. Verify each stage reaches a real report, the usage deduction matches the quote and refresh/restart behavior is understood.
-8. Delete that test run, inspect its receipt and complete any pending upstream cleanup. Recheck the private engine volume and processor dashboards rather than assuming a gateway acknowledgement erases every copy.
+| Service | Exposure | Proposed resources | Persistent mount |
+| --- | --- | --- | --- |
+| `branchline-app` | Public HTTPS application/API | `1c-2g` | 1 GB at `/data` |
+| `branchline-engine` | Private HTTP service on port 5001 | `2c-4g` | 10 GB at `/app/backend/uploads` |
 
-For local API testing the gateway remains on `http://127.0.0.1:8080`. Serve the interface on another local port, for example `8081`, and allow that exact origin. A public HTTPS page may be unable to call a local HTTP endpoint due to browser mixed-content/private-network rules; use the local interface or an HTTPS API for that test.
+These allocations are starting assumptions for a small pilot, not measured capacity or a price quote. One live job globally, at most 20 graph entities and 10 rounds, is the Blueprint's initial limit. Measure memory, disk growth, duration, and provider spend before widening limits. Confirm the actual cost in Render before creating services.
 
-## What this deployment does not activate
+Render's `pserv` service has no public URL; same-workspace services in the same region can reach it over the private network. Keep the engine private. The gateway's `MIROFISH_PRIVATE_HOSTPORT` uses a `fromService` reference; Python adds the HTTP scheme because Blueprint YAML does not interpolate environment variables. [Render private services](https://render.com/docs/private-services), [private networking](https://render.com/docs/private-network), [Blueprint specification](https://render.com/docs/blueprint-spec)
 
-Deploying containers does not activate checkout, automatic subscription credits, multi-user accounts, SSO, roles, team invitations, dedicated customer infrastructure or a durable distributed job queue. A manually provisioned token grants access to its entire workspace. The pilot charges workload credits on acceptance and has no automatic failure refund; an operator adjusts credits after investigating.
+## Create and configure the deployment
 
-Before taking payments, complete the gates in [LAUNCH.md](LAUNCH.md), including measured provider costs, provider spending caps and a verified small-budget real engine run. Set storage/backup retention and deletion operations that match the privacy policy you publish. The sample app is not a certification of security, privacy compliance or research accuracy.
+1. Connect the Branchline GitHub repository to a Render workspace and create a Blueprint from the repository's `render.yaml`. Review both paid services and disks before approving creation. Do not add another public web service for the engine.
+2. Supply engine secrets when prompted: `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL_NAME`, and `ZEP_API_KEY`. Use your own provider accounts and approved data-processing configuration. These are required for real work; test placeholder values only establish that a container can start.
+3. Supply the application SMTP host, port, username, password, and sender address. Verification email is required by default; without a configured mail path, self-service registration stays unavailable. Use a verified sender/domain and TLS-enabled delivery.
+4. Preserve the generated `BRANCHLINE_MASTER_SECRET` and shared `BRANCHLINE_ENGINE_CLEANUP_SECRET` securely. The master secret derives the gateway field-encryption key. Do not regenerate it for an existing database without an explicit migration. The shared cleanup secret must match on both services.
+5. Deploy the engine and application. Keep one instance and one application process. Open the app's HTTPS URL, inspect `/api/v1/config`, and confirm the interface discovers the same-origin service. `/health` checks liveness, not successful model inference.
+6. Register, verify email, sign in, and verify reset/logout behavior. A new self-service account starts with zero credits. For a non-paying pilot, an operator can allocate credits to its existing workspace with the provisioning command in [server/README.md](../server/README.md); do not create an unrelated second workspace and expect it to become that account's workspace.
+7. Run a small non-sensitive scenario with operator-allocated credits. Confirm graph creation, participant preparation, a bounded simulation, a readable report, the quoted workload-credit deduction, export, and deletion receipts. Inspect cleanup before repeating a failed or timed-out run.
+8. Configure Stripe in test mode only after the real engine path works. The separate billing launch flag remains off until the operator deliberately enables it after testing. See the billing section below.
 
-## Updating the upstream engine
+Render can build the repository's Dockerfiles directly. Keep provider values in Render environment/secret settings; never add secret-bearing build arguments or commit `.env`. [Docker deployment](https://render.com/docs/docker), [environment variables and secrets](https://render.com/docs/configure-environment-variables)
 
-The original source is vendored at a specific Git revision, recorded in `NOTICE`. Compare and review upstream changes before updating it, preserve original notices and rerun gateway contract tests. Publish the corresponding source for every hosted covered release. Do not replace the pinned source with an unreviewed `latest` container tag.
+The application uses `BRANCHLINE_PUBLIC_URL`, or Render's supplied external URL, as its account origin. If attaching a custom domain, set the exact new HTTPS origin explicitly, update allowed origins and email links, and redeploy. Same-origin cookie sessions are required for public accounts; an account hosted on the static demo's separate origin cannot be enabled by CORS alone. The optional operator bearer connection remains a separate pilot workflow.
+
+## Enable subscription checkout deliberately
+
+Configure three Stripe recurring monthly Prices: Solo A$49, Studio A$199, and Agency A$599, in AUD, quantity one. Set `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_SOLO`, `STRIPE_PRICE_STUDIO`, and `STRIPE_PRICE_AGENCY` on the application. The module verifies each configured Price before creating checkout; browser-supplied customer IDs, prices, or amounts are not accepted.
+
+Create a **snapshot** webhook destination at `https://YOUR_APP_ORIGIN/api/v1/billing/webhook`, using API version **`2025-06-30.basil`**. Subscribe to:
+
+- `checkout.session.completed`
+- `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`
+- `invoice.paid`, `invoice.payment_failed`
+
+The code verifies the raw request signature, retrieves current provider resources, and grants monthly credits only from matching paid subscription creation/cycle invoices. Checkout redirects grant nothing. Event, invoice, and subscription-period uniqueness prevent replayed grants. Monthly allocations replace unused subscription credits and expire at the paid period end. [Stripe Checkout subscriptions](https://docs.stripe.com/payments/checkout/build-subscriptions), [webhook setup](https://docs.stripe.com/events/set-up-events), [Basil invoice changes](https://docs.stripe.com/changelog/basil/2025-03-31/adds-new-parent-field-to-invoicing-objects)
+
+Configure the customer portal for payment details, invoices, and cancellation. Keep immediate plan switching and prorations disabled for this release: proration/update invoices do not refill a monthly allowance. Decide tax behavior, tax collection, customer terms, refund handling, and support before live keys. This module does not automatically enable Stripe Tax or issue refunds.
+
+Only set `BRANCHLINE_BILLING_ENABLED=true` after the engine, email, test checkout, paid invoice webhook, renewal, cancellation, and duplicate-event paths have been verified. `BRANCHLINE_ENGINE_ENABLED=true` is also required for new checkout. This is an operator-controlled launch gate, not automated proof of provider readiness. Pausing new checkout or the engine leaves configured webhooks and the existing customer portal available, so customers can still manage billing. [Stripe customer portal](https://docs.stripe.com/api/customer_portal/sessions/create)
+
+## Persistence and operations
+
+Render disks and snapshots are encrypted at rest. Only the mounted paths persist; disks are attached to one instance, unavailable to build/pre-deploy/one-off jobs, and disable zero-downtime deploys. Daily snapshots remain available for seven days. Maintain a consistent SQLite backup procedure and separate key backup; do not treat an arbitrary filesystem snapshot as a verified database recovery plan. [Render persistent disks](https://render.com/docs/disks)
+
+Provisioning, cleanup inspection, and database operations must run in the **existing application's** Dashboard Shell/SSH session, not an ephemeral shell or one-off job without its persistent disk. Verify mounted directories are writable by the application user and restrict shell access. [Render shell access](https://render.com/docs/ssh)
+
+Accepted jobs are persisted in SQLite and claimed by the single-process supervisor. Unclaimed queued jobs survive restart; jobs already handed to the engine become interrupted and are not automatically replayed. Do not deploy during an active simulation. Two-hour application timeouts, upstream stopping, and entity/round limits reduce exposure but do not guarantee a provider invoice cap. Set provider-side budgets and alerts.
+
+The gateway stores encrypted request/report fields, while the engine writes plaintext application files on its encrypted host disk. The private cleanup extension removes a completed simulation directory only after validating its identifier and checking active engine producers. Busy/failed cleanup remains in an encrypted remediation ledger and is retried. No local acknowledgement proves erasure of provider logs or backups. See [PRIVACY.md](PRIVACY.md).
+
+## Alternative Docker host
+
+The same application can run on an operator-controlled Linux Docker host using `docker compose`. Copy `.env.example`, configure the exact public application origin and secrets, then build and start the two services. Put a TLS reverse proxy in front of the gateway's localhost port 8080; keep engine port 5001 unpublished. Use encrypted volumes, backup expiry, resource limits, and monitoring. Serve the interface from the gateway for account sessions.
+
+A native install needs Python 3.11 or 3.12, a compatible dependency environment, Cairo/OpenMP libraries, and writable engine storage. The engine Dockerfile uses CPU PyTorch while leaving vendored source/lock unchanged, avoiding unnecessary CUDA wheels. The authoring Mac's default Python 3.9 is incompatible; remote Linux Docker validation is the preferred verification path. Container health/import checks do not run a paid model call. Review the [runtime validation workflow](https://github.com/2johnou-create/branchline/actions/runs/41620745805) and current repository checks for the exact tested revision.
+
+## Release and update discipline
+
+Review vendored upstream changes before replacing the revision in `NOTICE`, rerun adapter and cleanup tests, and publish the Corresponding Source for the served AGPL release. Preserve source and licence notices. Keep runtime databases, uploaded documents, outputs, credentials, and payment secrets out of Git history. See [LAUNCH.md](LAUNCH.md) for the remaining commercial release gates.

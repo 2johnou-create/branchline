@@ -98,6 +98,7 @@ class Engine:
             await self.call(client, "POST", "/api/simulation/start", json={
                 "simulation_id": sid, "platform": "twitter", "max_rounds": payload["rounds"],
                 "enable_graph_memory_update": False})
+            environment_closed = False
             while True:
                 state = await self.call(client, "GET", "/api/simulation/" + quote(sid, safe="") + "/run-status")
                 status = state.get("runner_status")
@@ -105,6 +106,12 @@ class Engine:
                     break
                 if status == "failed":
                     raise EngineFailure("The scenario run failed. Contact your workspace operator.")
+                # Upstream keeps the process alive for interviews after the
+                # simulation_end event. Its runner becomes terminal only after
+                # the environment closes; 100% progress alone is not sufficient.
+                if state.get("twitter_completed") is True and not environment_closed:
+                    await self.call(client, "POST", "/api/simulation/close-env", json={"simulation_id": sid, "timeout": 10})
+                    environment_closed = True
                 progress = min(100, max(0, float(state.get("progress_percent", 0))))
                 update(progress=55 + int(progress * .25))
                 await asyncio.sleep(self.settings.poll_interval)
@@ -151,5 +158,16 @@ class Engine:
                         receipt[label] = "deletion_acknowledged" if response.status_code == 404 or (response.is_success and body.get("success") is True) else "operator_cleanup_required"
                     except (httpx.HTTPError, ValueError, AttributeError):
                         receipt[label] = "operator_cleanup_required"
+            if refs.get("simulation_id") and self.settings.engine_cleanup_secret:
+                try:
+                    response = await client.delete("/internal/branchline/simulations/" + quote(refs["simulation_id"], safe=""),
+                        headers={"X-Branchline-Cleanup-Key": self.settings.engine_cleanup_secret})
+                    body = response.json()
+                    # A generic 404 could mean an older engine lacks the route,
+                    # not that its simulation artifacts were removed.
+                    if response.is_success and body.get("success") is True and body.get("data", {}).get("deleted") is True:
+                        receipt["simulation_artifacts"] = "deletion_acknowledged"
+                except (httpx.HTTPError, ValueError, AttributeError):
+                    pass
         return receipt
 

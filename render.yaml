@@ -1,0 +1,84 @@
+# Review the paid resources in Render before approving deployment.
+# Provider keys belong in Render's secret settings, never in GitHub source.
+services:
+  - type: pserv
+    name: branchline-engine
+    runtime: docker
+    region: singapore
+    plan: 2c-4g
+    numInstances: 1
+    dockerfilePath: ./engine.Dockerfile
+    dockerContext: .
+    autoDeployTrigger: 'off'
+    disk:
+      name: branchline-engine-data
+      mountPath: /app/backend/uploads
+      sizeGB: 10
+    envVars:
+      - key: LLM_API_KEY
+        sync: false
+      - key: LLM_BASE_URL
+        sync: false
+      - key: LLM_MODEL_NAME
+        sync: false
+      - key: ZEP_API_KEY
+        sync: false
+      - key: FLASK_DEBUG
+        value: 'false'
+      - key: BRANCHLINE_ENGINE_CLEANUP_SECRET
+        generateValue: true
+  - type: web
+    name: branchline-app
+    runtime: docker
+    region: singapore
+    plan: 1c-2g
+    numInstances: 1
+    dockerfilePath: ./server.Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeployTrigger: 'off'
+    disk:
+      name: branchline-gateway-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: BRANCHLINE_MASTER_SECRET
+        generateValue: true
+      - key: BRANCHLINE_DATABASE
+        value: /data/branchline.sqlite3
+      - key: PORT
+        value: '8080'
+      - key: MIROFISH_PRIVATE_HOSTPORT
+        fromService:
+          type: pserv
+          name: branchline-engine
+          property: hostport
+      - key: BRANCHLINE_ENGINE_CLEANUP_SECRET
+        fromService:
+          type: pserv
+          name: branchline-engine
+          envVarKey: BRANCHLINE_ENGINE_CLEANUP_SECRET
+      - key: BRANCHLINE_ENGINE_ENABLED
+        value: 'true'
+      - key: BRANCHLINE_REQUIRE_EMAIL_VERIFICATION
+        value: 'true'
+      - key: BRANCHLINE_BILLING_ENABLED
+        value: 'false'
+      - key: BRANCHLINE_MAX_ACTIVE_GLOBAL
+        value: '1'
+      - key: BRANCHLINE_MAX_AGENTS
+        value: '20'
+      - key: BRANCHLINE_MAX_ROUNDS
+        value: '10'
+      - key: BRANCHLINE_SMTP_HOST
+        sync: false
+      - key: BRANCHLINE_SMTP_PORT
+        value: '587'
+      - key: BRANCHLINE_SMTP_USERNAME
+        sync: false
+      - key: BRANCHLINE_SMTP_PASSWORD
+        sync: false
+      - key: BRANCHLINE_SMTP_FROM
+        sync: false
+      - key: BRANCHLINE_SMTP_STARTTLS
+        value: 'true'

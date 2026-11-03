@@ -1,76 +1,79 @@
 # Branchline privacy and data handling
 
-This guide describes the source implementation as of 3 November 2026. Deployment choices belong to the operator. It is an architecture guide, not a completed legal privacy notice or a certification. The operator must publish its identity, contact route, actual processors, configured regions, retention policies, and customer terms before accepting live customer data.
+This guide describes the source implementation as of 3 November 2026. It is an architecture guide, not a completed legal privacy notice or a certification. Before accepting live customer data, the operator must publish its identity/contact, actual providers, configured regions, retention/backup periods, and customer terms.
 
-## Two different modes
+## Static demonstration and full application
 
-**Public demonstration:** the interface provides sample scenarios and prewritten illustrative reports. Creating a demo scenario does not run MiroFish or analyse the brief. Draft text, imported text, and a connected workspace token are held in the current browser tab's memory rather than deliberately stored in browser local storage. Reloading or closing the tab ends that in-memory session. A report explicitly exported by the user is a separate downloaded copy under their control. The web host still receives ordinary page and asset requests and may maintain its own access records.
+The static demonstration uses sample scenarios and prewritten illustrative reports. A demo report does not analyse a submitted brief or run MiroFish. Drafts, imported text, and an optional operator workspace token are held in the browser tab's memory rather than deliberately persisted to local storage. Closing or reloading the tab ends that in-memory session. Downloaded exports, screenshots, browser extensions, and host access records are separate copies or access paths outside that promise.
 
-**Connected pilot:** an operator provisions a workspace token, hosts the gateway and private MiroFish engine, and supplies model and Zep credentials. After the visitor connects the gateway and confirms external processing, submitting a run sends the reviewed brief to the gateway and onward for live processing. This build has no public self-service account signup or paid subscription activation.
+The full application serves its interface and API from one HTTPS origin. It supports individual accounts and a private workspace. Email/name, password hashes, hashed session/mail tokens, workspace metadata, and billing references are stored server-side. The account session uses a Secure, HttpOnly, SameSite=Strict cookie on HTTPS and lasts up to seven days unless expired or revoked sooner. The session-bound CSRF token stays in page memory. Signing out revokes the current session; resetting a password revokes that user's existing sessions.
 
-## What the local privacy preview does
+Provider keys remain server-side. Live simulations require an enabled gateway, private engine, configured model/Zep credentials, and an approved submission. New checkout additionally requires explicit operator activation. Static hosting alone does not activate these services.
 
-The interface can mask common email-address and phone-number patterns before a brief is sent. It shows the reviewed brief to the visitor before submission. This is pattern-based redaction, not comprehensive anonymisation: names, locations, customer stories, unique events, identifiers in unusual formats, and commercially sensitive details may remain. Inspect the whole reviewed brief, including title, question, audience, and context. Do not assume a clean detection count means a document contains no sensitive data.
+## Local redaction and review
 
-Importing a text brief reads the file in the browser. A later live submission transmits the reviewed text; “read locally” is not a promise that the text will never leave the device.
+The interface masks common email-address and phone-number patterns and shows the reviewed payload before submission. This is not comprehensive anonymisation. Names, locations, rare events, customer stories, unusual identifier formats, and business secrets may remain. Inspect title, question, audience, and context; zero detected matches does not mean a brief is safe to share.
 
-## Connected data flow
+Importing text reads the file in the browser. A later live submission sends the reviewed text. “Read locally” describes the import step, not a promise that an approved cloud brief never leaves the device. Do not include personal information about real people unless you are authorised to process it through the selected providers.
+
+## Data flow
 
 ```text
-Visitor's browser
-  Reviewed brief + workspace bearer token
-    -> HTTPS gateway controlled by operator
-       Encrypted request/report payload in SQLite
-       Workspace and run metadata
-         -> Private MiroFish engine
-            Source text, graph references, personas, simulation files, reports
-              -> Operator-configured model provider
-              -> Zep Cloud knowledge graph
+Browser: draft -> local redaction -> reviewed approved brief
+  -> HTTPS application gateway: account/session, workspace, encrypted run payload
+    -> Private MiroFish engine: source, graph references, personas, simulation files/report
+      -> Operator-configured LLM provider
+      -> Zep Cloud
+
+Account verification/recovery -> operator-configured SMTP provider
+Billing actions -> Stripe-hosted Checkout/portal -> signed webhook -> credit ledger
 ```
 
-TLS must be configured by the operator for public gateway access. The engine container must remain on a private network; it has no independently suitable public multi-tenant authentication layer. Provider credentials belong on the server, not in browser code or a source repository. The browser's workspace token grants access to that workspace: do not share it or put it in a URL.
+The web host can process connection/access metadata. SMTP processes the account email and a one-time verification or reset link. Stripe processes payment/customer information in its hosted pages; Branchline does not collect card numbers. The billing integration sends opaque user/workspace identifiers as metadata and retains Stripe resource IDs, subscription status/periods, processed event IDs, and credit-grant records. The operator must add actual provider identities and policies to its public notice.
 
-## Controls implemented in the gateway
+## Implemented controls and boundaries
 
-| Control | What it covers | Limit |
+| Control | Covers | Boundary |
 | --- | --- | --- |
-| Workspace bearer authentication | Authenticated capabilities, run creation, run reads, and deletion | Tokens are operator-provisioned; there is no user identity, MFA, role model, or per-person audit trail |
-| Workspace-scoped record queries | Run access requires the authenticated workspace ID | Sharing a workspace token shares its authority; operational access still needs restriction |
-| Hashed stored tokens | SQLite stores a SHA-256 token hash rather than a recoverable token | A stolen live bearer token can still be used until replaced |
-| Fernet payload encryption | Run request, result, error, and upstream-reference payload stored in SQLite | Gateway decrypts for use; one operator-held key serves the pilot; this does not encrypt the whole database or engine volume |
-| Bounded requests and jobs | Request-size checks, exact CORS origin list, round and entity limits, active-run caps, request limiting and job timeout | These do not guarantee a maximum provider invoice or eliminate pre-simulation costs |
-| Safer error responses | Gateway avoids returning upstream bodies or invalid input content in validation errors | Host infrastructure and provider logging still need their own configuration |
-| Engine wrapper logging change | Disables standard Python logging before importing the engine; removes browser CORS response headers | Does not remove simulation output, direct stdout/stderr, worker artifacts, infrastructure logs, or provider records |
-| Gateway response cache headers | Responses request no-store behavior | This does not control screenshots, exports, browser extensions, compromised devices, or all intermediary behavior |
+| Password hashing | Salted scrypt hashes rather than plaintext passwords | Does not protect against a compromised live application or user device |
+| Sessions and CSRF | Hashed session records, HttpOnly secure cookie, same-origin checks and session-bound CSRF for account mutations | No MFA, SSO, team role model, or per-person team administration is provided |
+| Workspace authorization | Run queries require the authenticated account/workspace or a valid operator token | An operator bearer token grants its whole workspace's authority; do not share it between unrelated clients |
+| Payload encryption | Fernet-encrypted request, report, error, upstream-reference and cleanup payloads in SQLite | Server-side processing can decrypt them; this does not encrypt every metadata column or engine file |
+| Request/job controls | Request-size, rate, active-run, entity, round and time limits | These are not a guaranteed provider-invoice cap or a complete abuse-prevention service |
+| Logging changes | Gateway safe errors avoid returning raw upstream bodies; wrapper disables standard Python engine logging | Subprocess artifacts, stdout/stderr, infrastructure logs and provider records need separate handling |
+| Private engine | No public engine service in the recommended deployment; shared secret for cleanup extension | Trusted host/network operators can still access data; the native engine API is not a public tenant boundary |
+| Billing integrity | Server-selected prices/customers, signed raw-body webhooks, current-resource checks and atomic grant ledger | Accounting/provider records have a separate retention lifecycle; financial disputes/refunds need operator handling |
 
-Workspace names, IDs, run status, timestamps, credit balances, and some other metadata are not protected by the private-payload encryption. Operating-system permissions, encrypted host storage, backup controls, TLS, and secret management remain necessary. Keep the encryption key separate from database backups and plan key recovery; losing it makes stored encrypted content unreadable.
+Gateway workspace names/IDs, account email/name, password hashes, run status/timestamps, credits, and financial references are not all protected by private-run-payload encryption. Use encrypted host disks, restrictive permissions, TLS, secret management, and protected backups. Keep the encryption/master secret separately recoverable; losing it makes encrypted content unreadable. Rotating a master secret without a migration is not supported.
 
-MiroFish writes source documents and simulation artifacts to its filesystem. Those files are plaintext from the application's point of view. Use encrypted volumes and restricted operator access before live use. The supplied wrapper does not turn this into end-to-end encrypted inference: the gateway, engine, model provider, and graph service can process readable content as needed.
+MiroFish source files, generated personas and simulation artifacts are plaintext at the application filesystem level. An encrypted host volume protects storage media, not data from an authorised engine process or operator. The system does not provide end-to-end encrypted inference: the application, engine and external inference/graph services process readable content.
 
-## Retention and deletion
+## Run retention and deletion
 
-The request can select a gateway retention period from 1 to 30 days. The gateway records an expiry deadline from the creation time and scans expired terminal runs while its process is running. Active work is not removed by that scan; a running, unavailable, or stopped gateway can delay cleanup. Configure monitoring and operational cleanup rather than promising an exact deletion instant.
+A run can choose a gateway retention period of 1–30 days. Its deadline starts at creation. The running gateway periodically scans expired terminal runs; ongoing jobs, service downtime, upstream busy responses, or failures can delay cleanup. Do not promise an exact deletion instant.
 
-Deletion of a terminal run attempts to stop remaining upstream simulation work and calls the engine's report and project deletion endpoints. A project deletion can also request deletion of its referenced Zep graph. The returned receipt distinguishes acknowledged deletion, records not created, and cleanup that needs operator attention. An acknowledgement is a response from an API, not independent evidence that all copies have disappeared.
+A terminal-run deletion attempts to stop remaining simulation work, delete its report, and delete its project/referenced cloud graph. With the hardened engine and matching cleanup secret, it also requests removal of the simulation directory. The extension validates a bounded simulation identifier and refuses deletion while relevant tasks, processes, or monitor threads remain active. A generic missing route is not treated as evidence that files were erased.
 
-MiroFish has no simulation-artifact deletion API in this pinned integration. Persona files, simulation logs, and other artifacts require an operator procedure. The gateway's deletion endpoint therefore cannot promise complete engine erasure. Operators must inspect pending-cleanup receipts and remove the remaining files with appropriate care, including files associated with failed, interrupted, or timed-out preparation.
+Receipts distinguish acknowledged operations, resources not created, and operations needing attention. Pending remote cleanup retains only encrypted resource references and acknowledgements in a separate ledger, without the customer's brief or generated report. The running gateway retries supported operations. Operators can list/retry tasks with `python -m server.cleanup`; manual resolution is an operator attestation after inspection, not independent proof of remote erasure.
 
-When supported upstream cleanup remains pending, the gateway retains a separate encrypted cleanup task with resource references and acknowledgements, without the customer brief or generated report. This is intentional limited retention for remediation. Operators can list and retry these tasks through `python -m server.cleanup`; they must verify manual artifact removal before resolving a task. See the [gateway operating guide](../server/README.md#privacy-scope-and-deletion). A task marked resolved is an operator attestation, not an automated proof of remote erasure.
+The upstream engine itself has no complete simulation-artifact deletion API; Branchline adds a narrow private extension around the vendored source. Older engines without that extension, busy resources, paths outside its supported directory, and orphaned work without a recorded ID need operator review. Keep backups, volume lifecycle and incident procedures consistent with the public notice.
 
-Deleting a gateway row does not revoke report exports or screenshots. Encrypted database pages may also remain in WAL files, snapshots, and backups until those copies expire. Deleting encryption keys requires a deliberate key-management procedure and cannot be substituted for an unverified “delete everything” claim.
+Gateway row removal does not revoke exports or screenshots. Database WAL pages, snapshots and backups may retain earlier encrypted data until expiry. Provider logs, model-service retention and Zep backups have separate policies. Current Zep documentation describes internal copies surviving context deletion, including disaster-recovery backups up to 365 days and graph write logs up to 90 days; verify the deployed API/account and contractual terms rather than treating those as Branchline-enforced limits. [Zep retention documentation](https://help.getzep.com/context-retention)
 
-The model provider and Zep have independent retention, logging, and backup policies. Current Zep documentation describes internal copies that can survive context deletion, including disaster-recovery backups up to 365 days and graph write logs up to 90 days. Verify the deployed API/SDK version, account configuration, and contract; these are not time limits enforced by Branchline. [Zep retention documentation](https://help.getzep.com/context-retention)
+## Account export and deletion
+
+A signed-in account can export its current account details and runs, including stored context. Deletion requires its password and no active simulations. The checkout/deletion lock prevents starting a new checkout while the account is being frozen. Existing active subscriptions must be cancelled before deletion; unexpired pending checkout also blocks deletion to avoid a later charge on an erased account.
+
+Account deletion disables the user, clears account email/name/password data, revokes sessions and mail tokens, blocks its workspace and credits, and removes gateway run content into the cleanup workflow. Minimal anonymized account/workspace identifiers, encrypted pending-cleanup references, and financial event/grant records can remain. Stripe, SMTP, hosting and other providers retain their own copies under their policies. A cancelled subscription is not automatically a deleted Stripe customer or erased accounting history.
 
 ## Claims this build does not establish
 
-Do not advertise zero retention, immediate complete erasure, end-to-end encrypted inference, Australian-only processing, automatic provider training exclusion, or a compliance certification. Hosting the gateway in Australia alone does not constrain model and graph processing to Australia. Customer-provided provider credentials also do not automatically change a provider's terms.
+Do not advertise zero retention, immediate complete erasure, Australian-only processing, automatic model-training exclusion, end-to-end encrypted computation, or a compliance certification. Singapore hosting is not Australian residency; a host region also does not constrain model and graph processing. Customer-provided API keys do not by themselves alter provider terms.
 
-The privacy receipt identifies the current processing categories and gateway retention setting; the operator still needs to populate precise provider names, regions, policy links, and backup terms. A receipt should preserve uncertainty rather than convert an unavailable cleanup check into a success claim.
+The processing receipt describes gateway retention and processor categories. The operator must publish exact provider names, regions, policy links and backup periods. Keep unavailable checks visibly unresolved rather than converting them into a success badge.
 
-Synthetic participants are fictional. Their statements and percentages are not evidence of actual people's views or calibrated predictions. Publish this limitation with reports, and use real customer research to validate decisions.
+Synthetic participants are fictional. Their statements and percentages are not evidence of actual people's views or calibrated forecasts. Keep that limitation with reports and validate decisions through real customer research.
 
-## Operator settings before live use
+## Before live use
 
-Configure exact allowed HTTPS origins, a restricted private engine address, a securely generated encryption key, persistent encrypted storage, provider keys and model revision, access-controlled backups and their expiry, and the identity of the person responsible for cleanup. Restrict gateway and engine administrator access. Disable request-body capture in proxies and monitoring. Publish an accurate list of providers and processing locations.
-
-Use a small, non-sensitive test project to verify the entire live path, a cross-workspace access denial, a failed run, restart behavior, expiration, a deletion receipt, and manual artifact cleanup. Keep public demo access separate from the gateway's operator-issued workspace access.
+Configure HTTPS origins, host restrictions, a private engine, strong application and cleanup secrets, encrypted storage, protected backups and expiry, provider budgets, SMTP, accurate notices, and a responsible operator. Disable prompt/body/token capture in proxies and monitoring. Verify a non-sensitive live run, cross-workspace denials, recovery, expiry, deletion receipts, automatic retries, and account/billing deletion boundaries before onboarding customers.

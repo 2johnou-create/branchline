@@ -4,11 +4,28 @@ services:
       context: .
       dockerfile: server.Dockerfile
     environment:
-      BRANCHLINE_ENCRYPTION_KEY: ${BRANCHLINE_ENCRYPTION_KEY:?Set the gateway encryption key in .env}
-      BRANCHLINE_ALLOWED_ORIGINS: ${BRANCHLINE_ALLOWED_ORIGINS:?Set the exact public UI origin in .env}
+      BRANCHLINE_MASTER_SECRET: ${BRANCHLINE_MASTER_SECRET:?Set a generated master secret in .env}
+      BRANCHLINE_PUBLIC_URL: ${BRANCHLINE_PUBLIC_URL:?Set the combined application origin in .env}
+      BRANCHLINE_ALLOWED_ORIGINS: ${BRANCHLINE_PUBLIC_URL:?Set the combined application origin in .env}
       BRANCHLINE_JOB_TIMEOUT: ${BRANCHLINE_JOB_TIMEOUT:-7200}
       BRANCHLINE_MAX_ROUNDS: ${BRANCHLINE_MAX_ROUNDS:-20}
       BRANCHLINE_MAX_AGENTS: ${BRANCHLINE_MAX_AGENTS:-40}
+      BRANCHLINE_MAX_ACTIVE_GLOBAL: ${BRANCHLINE_MAX_ACTIVE_GLOBAL:-1}
+      BRANCHLINE_ENGINE_ENABLED: ${BRANCHLINE_ENGINE_ENABLED:-false}
+      BRANCHLINE_ENGINE_CLEANUP_SECRET: ${BRANCHLINE_ENGINE_CLEANUP_SECRET:?Set a generated cleanup secret in .env}
+      BRANCHLINE_REQUIRE_EMAIL_VERIFICATION: ${BRANCHLINE_REQUIRE_EMAIL_VERIFICATION:-true}
+      BRANCHLINE_SMTP_HOST: ${BRANCHLINE_SMTP_HOST:-}
+      BRANCHLINE_SMTP_PORT: ${BRANCHLINE_SMTP_PORT:-587}
+      BRANCHLINE_SMTP_USERNAME: ${BRANCHLINE_SMTP_USERNAME:-}
+      BRANCHLINE_SMTP_PASSWORD: ${BRANCHLINE_SMTP_PASSWORD:-}
+      BRANCHLINE_SMTP_FROM: ${BRANCHLINE_SMTP_FROM:-}
+      BRANCHLINE_SMTP_STARTTLS: ${BRANCHLINE_SMTP_STARTTLS:-true}
+      BRANCHLINE_BILLING_ENABLED: ${BRANCHLINE_BILLING_ENABLED:-false}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_PRICE_SOLO: ${STRIPE_PRICE_SOLO:-}
+      STRIPE_PRICE_STUDIO: ${STRIPE_PRICE_STUDIO:-}
+      STRIPE_PRICE_AGENCY: ${STRIPE_PRICE_AGENCY:-}
       BRANCHLINE_DATABASE: /data/branchline.sqlite3
       MIROFISH_BASE_URL: http://mirofish:5001
     ports:
@@ -23,6 +40,7 @@ services:
     security_opt:
       - no-new-privileges:true
     cap_drop: [ALL]
+    cap_add: [CHOWN, FOWNER, SETUID, SETGID]
     read_only: true
     tmpfs:
       - /tmp:uid=10001,gid=10001,mode=700
@@ -41,6 +59,7 @@ services:
       LLM_MODEL_NAME: ${LLM_MODEL_NAME:?Set the LLM model name in .env}
       ZEP_API_KEY: ${ZEP_API_KEY:?Set the engine Zep API key in .env}
       FLASK_DEBUG: "false"
+      BRANCHLINE_ENGINE_CLEANUP_SECRET: ${BRANCHLINE_ENGINE_CLEANUP_SECRET:?Set a generated cleanup secret in .env}
     expose:
       - "5001"
     volumes:
@@ -50,6 +69,7 @@ services:
     security_opt:
       - no-new-privileges:true
     cap_drop: [ALL]
+    cap_add: [CHOWN, FOWNER, SETUID, SETGID]
     tmpfs:
       - /tmp:uid=10001,gid=10001,mode=700
       - /app/backend/logs:uid=10001,gid=10001,mode=700

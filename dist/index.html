@@ -11,6 +11,7 @@
   <link rel="icon" href="./favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="./styles.css">
   <script src="./app.js" defer></script>
+  <script src="./platform.js" defer></script>
 </head>
 <body>
   <a class="skip" href="#main">Skip to content</a>
@@ -25,10 +26,10 @@
         <a href="#privacy" data-view="privacy"><span class="nav-icon" aria-hidden="true">♧</span> Privacy centre</a>
         <a href="#plans" data-view="plans"><span class="nav-icon" aria-hidden="true">◇</span> Plans & usage</a>
       </nav>
-      <div class="sidebar-bottom"><div class="local-card"><div class="local-dot"></div><strong>Start with a little what if.</strong><p>Try a sample. Your next decision deserves a rehearsal.</p><button class="button sidebar-button" data-action="new">New scenario <span>↗</span></button></div><a href="#settings" class="settings-link" data-view="settings"><span class="nav-icon" aria-hidden="true">⚙</span> Workspace settings</a><div class="sidebar-footer"><span class="user-avatar">Y</span><div>Your session<small>Local demo workspace</small></div><span class="session-pill">DEMO</span></div></div>
+      <div class="sidebar-bottom"><div class="local-card"><div class="local-dot"></div><strong>Start with a little what if.</strong><p>Build your brief. Review the costs. Run when you’re ready.</p><button class="button sidebar-button" data-action="new">New scenario <span>↗</span></button></div><a href="#settings" class="settings-link" data-view="settings"><span class="nav-icon" aria-hidden="true">⚙</span> Workspace settings</a><div class="sidebar-footer"><span class="user-avatar">Y</span><div>Your session<small>Local demo workspace</small></div><span class="session-pill">DEMO</span></div></div>
     </aside>
     <div class="workspace-body">
-      <header class="topbar"><div><span class="mobile-logo">branchline.</span><span class="breadcrumb">Workspace <span>/</span> <strong id="breadcrumb-label">Overview</strong></span></div><div class="topbar-actions"><button id="connection-status" class="connection-badge" data-action="settings"><span></span> Demo · engine not connected</button><a class="source-link" href="https://github.com/2johnou-create/branchline" target="_blank" rel="noopener noreferrer">Source <span>↗</span></a></div></header>
+      <header class="topbar"><div><span class="mobile-logo">branchline.</span><span class="breadcrumb">Workspace <span>/</span> <strong id="breadcrumb-label">Overview</strong></span></div><div class="topbar-actions"><button id="account-button" class="button button-quiet" data-action="account">Sign in</button><button id="connection-status" class="connection-badge" data-action="settings"><span></span> Demo · engine not connected</button><a class="source-link" href="https://github.com/2johnou-create/branchline" target="_blank" rel="noopener noreferrer">Source <span>↗</span></a></div></header>
       <main id="main" tabindex="-1"></main>
       <footer class="main-footer"><span>Built on <a href="https://github.com/666ghj/MiroFish" target="_blank" rel="noopener noreferrer">MiroFish</a>. Made for clearer thinking.</span><span>Synthetic scenarios, human decisions. <a href="#privacy">Privacy</a> <a href="https://github.com/2johnou-create/branchline" target="_blank" rel="noopener noreferrer">AGPL source ↗</a></span></footer>
     </div>
@@ -38,6 +39,7 @@
       <div class="dialog-header"><div><p class="eyebrow" id="wizard-eyebrow">A LITTLE WHAT IF</p><h2 id="scenario-heading" tabindex="-1">Set the scene.</h2></div><button class="icon-button" type="button" data-action="close-dialog" aria-label="Close scenario builder">×</button></div>
       <div class="wizard-progress" aria-label="Scenario steps"><span id="step-one-label" class="current">01 &nbsp; Your brief</span><span id="step-two-label">02 &nbsp; Review & privacy</span></div>
       <div id="wizard-step-one">
+        <label>Run mode<select id="run-mode"><option value="real" selected>Real MiroFish simulation</option><option value="sample">Prewritten sample preview — no inference</option></select></label>
         <p class="muted dialog-intro">A clear question makes a more useful rehearsal. Start with a template or bring your own brief.</p>
         <label>Scenario name<input id="brief-title" name="title" maxlength="120" required placeholder="e.g. A new price for our monthly membership"></label>
         <label>The decision you want to explore<textarea id="brief-question" name="question" rows="2" minlength="10" maxlength="4000" required placeholder="What could happen if…"></textarea></label>
@@ -52,6 +54,7 @@
         <div class="review-label">EXACT BRIEF TO BE SENT <span id="review-mode-label">LOCAL DEMO — NOT SENT</span></div>
         <pre id="payload-preview" class="payload-preview" tabindex="0"></pre>
         <div id="review-data-path" class="data-path"></div>
+        <div id="run-cost-quote" class="run-cost-quote" role="status" aria-live="polite" hidden></div>
         <label class="consent-label" id="consent-wrap" hidden><input type="checkbox" id="processing-consent"><span>I have reviewed this brief and consent to processing by the connected gateway, its configured LLM provider, and Zep Cloud.</span></label>
         <p class="small muted" id="review-disclaimer">This opens a prewritten illustrative report. It does not analyse your brief or run MiroFish.</p>
       </div>

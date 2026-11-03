@@ -27,7 +27,7 @@ jobs:
           docker run --rm --network none branchline-engine:check python -c "import oasis, camel, torch, cairocffi; from app import create_app; assert torch.version.cuda is None; print('CPU simulation runtime imports passed')"
       - name: Check engine API and hardening without provider calls
         run: |
-          docker run --rm --network none -e LLM_API_KEY=nonfunctional-ci-placeholder -e ZEP_API_KEY=nonfunctional-ci-placeholder branchline-engine:check python -c "import engine_entry; c=engine_entry.application.test_client(); r=c.get('/health',headers={'Origin':'https://untrusted.example'}); assert r.status_code==200; assert not any(k.lower().startswith('access-control-') for k in r.headers.keys()); assert not engine_entry.application.debug; print('Private engine health and hardening passed')"
+          docker run --rm --network none -e LLM_API_KEY=nonfunctional-ci-placeholder -e ZEP_API_KEY=nonfunctional-ci-placeholder -e BRANCHLINE_ENGINE_CLEANUP_SECRET=nonfunctional-ci-cleanup-key-32-characters branchline-engine:check python -c "import engine_entry; c=engine_entry.application.test_client(); r=c.get('/health',headers={'Origin':'https://untrusted.example'}); assert r.status_code==200; assert not any(k.lower().startswith('access-control-') for k in r.headers.keys()); assert not engine_entry.application.debug; path='/internal/branchline/simulations/sim_abcdef123456'; assert c.delete(path).status_code==403; r=c.delete(path,headers={'X-Branchline-Cleanup-Key':'nonfunctional-ci-cleanup-key-32-characters'}); assert r.status_code==200 and r.json['data']['deleted'] is True; print('Private engine health and hardening passed')"
   gateway:
     runs-on: ubuntu-latest
     timeout-minutes: 10

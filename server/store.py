@@ -48,7 +48,15 @@ class Store:
               CREATE TABLE IF NOT EXISTS cleanup_tasks (
                 id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id),
                 run_id TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, private BLOB NOT NULL);
+              CREATE TABLE IF NOT EXISTS job_queue (
+                run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+                status TEXT NOT NULL, worker_id TEXT, lease_until INTEGER NOT NULL DEFAULT 0,
+                attempts INTEGER NOT NULL DEFAULT 0);
             """)
+            columns = {r["name"] for r in db.execute("PRAGMA table_info(workspaces)")}
+            for name in ("blocked", "subscription_expires_at"):
+                if name not in columns:
+                    db.execute(f"ALTER TABLE workspaces ADD COLUMN {name} INTEGER NOT NULL DEFAULT 0")
 
     @contextmanager
     def connection(self, write=False):
@@ -85,12 +93,12 @@ class Store:
                 if not changed:
                     raise ValueError("Workspace does not exist")
             else:
-                db.execute("INSERT INTO workspaces VALUES (?,?,?,?)", (wid, name, token_hash(token), credits))
+                db.execute("INSERT INTO workspaces(id,name,token_hash,credits) VALUES (?,?,?,?)", (wid, name, token_hash(token), credits))
         return wid, token
 
     def workspace(self, token):
         with self.connection() as db:
-            row = db.execute("SELECT id,name,credits FROM workspaces WHERE token_hash=?", (token_hash(token),)).fetchone()
+            row = db.execute("SELECT id,name,CASE WHEN subscription_expires_at>0 AND subscription_expires_at<=CAST(strftime('%s','now') AS INTEGER) THEN 0 ELSE credits END AS credits FROM workspaces WHERE token_hash=? AND blocked=0", (token_hash(token),)).fetchone()
         return dict(row) if row else None
 
     def allow_request(self, wid, limit):
@@ -109,7 +117,10 @@ class Store:
         private = {"request": payload, "upstream": {}, "result": None, "error": None}
         placeholders = ",".join("?" for _ in ACTIVE)
         with self.connection(write=True) as db:
-            row = db.execute("SELECT credits FROM workspaces WHERE id=?", (wid,)).fetchone()
+            row = db.execute("SELECT credits,blocked,subscription_expires_at FROM workspaces WHERE id=?", (wid,)).fetchone()
+            import time
+            if not row or row["blocked"] or (row["subscription_expires_at"] > 0 and row["subscription_expires_at"] <= int(time.time())):
+                raise QuotaExceeded("This workspace is unavailable or its credit period has expired.")
             active = db.execute(f"SELECT count(*) FROM runs WHERE workspace_id=? AND status IN ({placeholders})", (wid, *ACTIVE)).fetchone()[0]
             total = db.execute(f"SELECT count(*) FROM runs WHERE status IN ({placeholders})", ACTIVE).fetchone()[0]
             if active >= max_active or total >= max_global:
@@ -119,7 +130,39 @@ class Store:
             db.execute("UPDATE workspaces SET credits=credits-? WHERE id=?", (cost, wid))
             db.execute("INSERT INTO runs VALUES (?,?,?,?,?,?,?,?,?,?)",
                        (rid, wid, "queued", "Queued", 0, now, now, expires, cost, self.encrypt(private)))
+            db.execute("INSERT INTO job_queue(run_id,status) VALUES (?, 'queued')", (rid,))
         return rid
+
+    def claim_next(self, worker_id, lease_seconds=90):
+        import time
+        with self.connection(write=True) as db:
+            row = db.execute("SELECT runs.* FROM job_queue JOIN runs ON runs.id=job_queue.run_id JOIN workspaces ON workspaces.id=runs.workspace_id WHERE job_queue.status='queued' AND runs.status='queued' AND workspaces.blocked=0 ORDER BY runs.created_at LIMIT 1").fetchone()
+            if not row:
+                return None
+            db.execute("UPDATE job_queue SET status='claimed',worker_id=?,lease_until=?,attempts=attempts+1 WHERE run_id=? AND status='queued'", (worker_id, int(time.time()) + lease_seconds, row["id"]))
+            return self.unpack(row)
+
+    def heartbeat(self, rid, worker_id):
+        import time
+        with self.connection(write=True) as db:
+            return db.execute("UPDATE job_queue SET lease_until=? WHERE run_id=? AND worker_id=? AND status='claimed'", (int(time.time()) + 90, rid, worker_id)).rowcount == 1
+
+    def finish_job(self, rid, worker_id=None):
+        with self.connection(write=True) as db:
+            if worker_id is not None:
+                db.execute("UPDATE job_queue SET status='done',lease_until=0 WHERE run_id=? AND worker_id=?", (rid, worker_id))
+            else:
+                db.execute("UPDATE job_queue SET status='done',lease_until=0 WHERE run_id=?", (rid,))
+
+    def claim_interrupted_jobs(self, worker_id):
+        # A claimed task may have triggered paid upstream work. Never replay it.
+        import time
+        with self.connection(write=True) as db:
+            now = int(time.time())
+            rows = db.execute("SELECT runs.* FROM runs LEFT JOIN job_queue ON job_queue.run_id=runs.id WHERE runs.status IN ('queued','building','preparing','running','reporting') AND ((job_queue.status IN ('claimed','recovering') AND job_queue.lease_until<=?) OR job_queue.run_id IS NULL)", (now,)).fetchall()
+            for row in rows:
+                db.execute("INSERT INTO job_queue(run_id,status,worker_id,lease_until,attempts) VALUES(?,'recovering',?,?,1) ON CONFLICT(run_id) DO UPDATE SET status='recovering',worker_id=excluded.worker_id,lease_until=excluded.lease_until", (row["id"], worker_id, now + 90))
+            return [self.unpack(r) for r in rows]
 
     def get(self, wid, rid):
         with self.connection() as db:

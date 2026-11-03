@@ -3,16 +3,24 @@ import asyncio
 from contextlib import asynccontextmanager, suppress
 import logging
 import os
+from pathlib import Path
 from typing import Literal
+import uuid
+import time
+from urllib.parse import urlparse
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.staticfiles import StaticFiles
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 
 from .config import Settings
+from .auth import Auth, EmailBody, LoginBody, PasswordBody, RegisterBody, ResetBody, TokenBody, hash_password, verify_password
+from .billing import Billing, BillingError
 from .engine import Engine, EngineFailure
 from .store import ACTIVE, Store, QuotaExceeded
 
@@ -59,12 +67,15 @@ def public_run(row):
     }
 
 
-def create_app(settings=None, *, engine=None, launch_jobs=True):
+def create_app(settings=None, *, engine=None, launch_jobs=True, mailer=None, billing=None):
     settings = settings or Settings.from_env()
     os.umask(0o077)
     store = Store(settings.database, settings.encryption_key)
     engine = engine or Engine(settings)
+    auth = Auth(settings, store, mailer=mailer)
+    billing = billing or Billing(settings, store)
     jobs = set()
+    worker_id = str(uuid.uuid4())
 
     async def execute(wid, rid, payload):
         def update(**changes):
@@ -93,6 +104,32 @@ def create_app(settings=None, *, engine=None, launch_jobs=True):
             if row:
                 await engine.stop(row["private"]["upstream"])
             update(status="failed", stage="Run failed", error="An internal processing error occurred. Contact the workspace operator.")
+        finally:
+            store.finish_job(rid, worker_id)
+
+    async def supervise():
+        last_heartbeat = 0
+        while True:
+            while len(jobs) < settings.max_active_global:
+                row = store.claim_next(worker_id)
+                if not row:
+                    break
+                task = asyncio.create_task(execute(row["workspace_id"], row["id"], row["private"]["request"]))
+                jobs.add(task)
+                task.add_done_callback(jobs.discard)
+            if time.monotonic() - last_heartbeat > 20:
+                for row in store.all_active():
+                    store.heartbeat(row["id"], worker_id)
+                last_heartbeat = time.monotonic()
+                await recover_claimed()
+            await asyncio.sleep(.2)
+
+    async def recover_claimed():
+        for row in store.claim_interrupted_jobs(worker_id):
+            await engine.stop(row["private"]["upstream"])
+            store.update(row["workspace_id"], row["id"], status="interrupted", stage="Gateway restarted",
+                         error="The gateway lost this run's execution lease. Ask the operator to review upstream jobs before retrying.")
+            store.finish_job(row["id"], worker_id)
 
     async def delete_row(row):
         receipt = await engine.cleanup(row["private"]["upstream"])
@@ -101,36 +138,50 @@ def create_app(settings=None, *, engine=None, launch_jobs=True):
                 "cleanup_task_id": cid, "cleanup_pending": cid is not None,
                 "notes": ["Deleted content may remain in operator backups until backup expiry.",
                           "Upstream deletion acknowledgements are not proof of provider backup erasure.",
-                          "MiroFish has no simulation-artifact deletion API. Its profiles/logs require operator cleanup.",
+                          "Engine artifact deletion is attempted when the hardened cleanup service is configured. Unresolved copies require operator attention.",
                           "Minimal encrypted upstream references are retained in the cleanup ledger while remediation is pending; the customer brief and report are removed."]}
 
     async def retention_loop():
         while True:
+            auth.expire_ephemeral()
             for row in store.expired():
                 try:
                     await delete_row(row)
                 except Exception:
                     logger.error("Retention cleanup needs operator attention; run_id=%s", row["id"])
+            for task in store.cleanup_tasks()[:3]:
+                try:
+                    receipt = await engine.cleanup(task["private"]["upstream"])
+                    store.update_cleanup(task["id"], receipt)
+                    if not any(v == "operator_cleanup_required" for v in receipt.values()):
+                        store.resolve_cleanup(task["id"])
+                except Exception:
+                    logger.error("Upstream erasure retry needs operator attention; cleanup_id=%s", task["id"])
             await asyncio.sleep(60)
 
     @asynccontextmanager
     async def lifespan(app):
-        # This pilot runs one gateway worker. Do not silently replay paid tasks after a restart.
-        for row in store.all_active():
-            await engine.stop(row["private"]["upstream"])
-            store.update(row["workspace_id"], row["id"], status="interrupted", stage="Gateway restarted",
-                         error="The gateway restarted during this run. Ask the operator to review upstream jobs before retrying.")
+        # Accepted queued jobs survive restart. Claimed jobs may have triggered paid
+        # upstream work, so they are interrupted rather than silently replayed.
+        await recover_claimed()
         retention = asyncio.create_task(retention_loop())
+        supervisor = asyncio.create_task(supervise()) if launch_jobs else None
         yield
         retention.cancel()
+        if supervisor:
+            supervisor.cancel()
         for task in list(jobs):
             task.cancel()
-        await asyncio.gather(retention, *list(jobs), return_exceptions=True)
+        await asyncio.gather(retention, *([supervisor] if supervisor else []), *list(jobs), return_exceptions=True)
 
     app = FastAPI(title="Branchline Gateway", version="0.1.0", lifespan=lifespan,
                   docs_url=None, redoc_url=None, openapi_url=None)
     app.state.store = store
     app.state.engine = engine
+    app.state.auth = auth
+    app.state.billing = billing
+    if settings.enforce_host:
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=[urlparse(settings.public_url).hostname, "localhost", "127.0.0.1"])
     app.add_middleware(CORSMiddleware, allow_origins=list(settings.origins),
                        allow_methods=["GET", "POST", "DELETE"], allow_headers=["Authorization", "Content-Type"],
                        allow_credentials=False, max_age=600)
@@ -162,15 +213,151 @@ def create_app(settings=None, *, engine=None, launch_jobs=True):
         # FastAPI defaults echo invalid user inputs; return only field paths/messages.
         return JSONResponse({"detail": [{"loc": e["loc"], "msg": e["msg"], "type": e["type"]} for e in exc.errors()]}, status_code=422)
 
-    async def workspace(credentials: HTTPAuthorizationCredentials = Depends(bearer)):
-        if not credentials or credentials.scheme.lower() != "bearer" or len(credentials.credentials) > 512:
-            raise HTTPException(401, "A valid workspace token is required", headers={"WWW-Authenticate": "Bearer"})
-        row = store.workspace(credentials.credentials)
+    @app.exception_handler(BillingError)
+    async def billing_error(request, exc):
+        return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+
+    async def account_user(request: Request):
+        user = auth.session_user(request)
+        if not user:
+            raise HTTPException(401, "Sign in to your Branchline account")
+        if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+            auth.csrf(request)
+        return user
+
+    async def workspace(request: Request, credentials: HTTPAuthorizationCredentials = Depends(bearer)):
+        if credentials:
+            if credentials.scheme.lower() != "bearer" or len(credentials.credentials) > 512:
+                raise HTTPException(401, "A valid workspace token is required", headers={"WWW-Authenticate": "Bearer"})
+            row = store.workspace(credentials.credentials)
+        else:
+            user = await account_user(request)
+            row = {"id": user["workspace_id"], "name": user["workspace_name"], "credits": user["credits"]}
         if not row:
             raise HTTPException(401, "A valid workspace token is required", headers={"WWW-Authenticate": "Bearer"})
         if not store.allow_request(row["id"], settings.requests_per_minute):
             raise HTTPException(429, "Workspace request limit reached. Try again shortly.", headers={"Retry-After": "60"})
         return row
+
+    def account_result(user, raw_session):
+        return {"user": {"id": user["id"], "email": user["email"], "name": user["name"], "email_verified": bool(user["email_verified"])},
+                "workspace": {"id": user["workspace_id"], "name": user["workspace_name"]},
+                "credits_remaining": user["credits"], "subscription": billing.summary(user["workspace_id"]),
+                "csrf_token": auth.csrf_token(raw_session)}
+
+    @app.get("/api/v1/config")
+    async def public_config():
+        return {"mode": "selfhost", "auth": {"enabled": True, "signup_enabled": auth.signup_enabled,
+                "email_verification_required": settings.require_email_verification, "email_delivery_ready": auth.mailer.ready},
+                "billing": {"enabled": billing.enabled, "plans": billing.plans},
+                "engine": {"configured": settings.engine_enabled, "verified": False}}
+
+    @app.post("/api/v1/auth/register")
+    async def register(body: RegisterBody, request: Request, response: Response):
+        auth.origin(request)
+        auth.limit(request, "register", body.email, count=3, seconds=3600, ip_count=30)
+        if not auth.signup_enabled:
+            raise HTTPException(503, "Account registration requires configured verification email delivery")
+        encoded = await auth.password_work(hash_password, body.password)
+        user = auth.create_user(body, encoded)
+        if settings.require_email_verification:
+            existing = user or auth.user(email=body.email)
+            if existing and not existing["email_verified"]:
+                await auth.send_token(existing, "verify")
+            response.status_code = 202
+            return {"status": "verification_required", "message": "If this address can be registered, a verification link has been sent. Check your inbox or sign in."}
+        if not user:
+            raise HTTPException(409, "This account cannot be registered. Try signing in or resetting your password.")
+        response.status_code = 201
+        return account_result(user, auth.session(user, response))
+
+    @app.post("/api/v1/auth/login")
+    async def login(body: LoginBody, request: Request, response: Response):
+        auth.origin(request)
+        auth.limit(request, "login", body.email)
+        user = auth.user(email=body.email)
+        valid = await auth.password_work(verify_password, body.password, user["password_hash"] if user else auth.dummy_hash)
+        if not user or not valid:
+            raise HTTPException(401, "Email or password is incorrect")
+        if not user["email_verified"]:
+            raise HTTPException(403, "Verify your email before signing in. Register again to resend a verification link.")
+        return account_result(user, auth.session(user, response))
+
+    @app.get("/api/v1/auth/me")
+    async def me(request: Request, user=Depends(account_user)):
+        return account_result(user, request.cookies[auth.cookie_name])
+
+    @app.post("/api/v1/auth/logout", status_code=204)
+    async def logout(request: Request, user=Depends(account_user)):
+        response = Response(status_code=204)
+        auth.logout(request, response)
+        return response
+
+    @app.post("/api/v1/auth/verify")
+    async def verify(body: TokenBody, request: Request, response: Response):
+        auth.origin(request)
+        auth.limit(request, "verify", count=12)
+        user = auth.consume_token(body.token, "verify")
+        return account_result(user, auth.session(user, response))
+
+    @app.post("/api/v1/auth/forgot-password", status_code=202)
+    async def forgot_password(body: EmailBody, request: Request):
+        auth.origin(request)
+        auth.limit(request, "reset", body.email, count=3, seconds=3600, ip_count=30)
+        if not auth.mailer.ready:
+            raise HTTPException(503, "Password recovery requires configured email delivery")
+        user = auth.user(email=body.email)
+        if user:
+            await auth.send_token(user, "reset")
+        return {"message": "If this account exists, a password reset link has been sent."}
+
+    @app.post("/api/v1/auth/reset-password")
+    async def reset_password(body: ResetBody, request: Request):
+        auth.origin(request)
+        auth.limit(request, "reset-confirm", count=12)
+        if not auth.token_valid(body.token, "reset"):
+            raise HTTPException(400, "This link has expired or has already been used")
+        encoded = await auth.password_work(hash_password, body.password)
+        auth.consume_token(body.token, "reset", password_hash=encoded)
+        return {"message": "Your password has been changed. Sign in again."}
+
+    @app.get("/api/v1/account/export")
+    async def account_export(request: Request, user=Depends(account_user)):
+        with store.connection() as db:
+            rows = [store.unpack(r) for r in db.execute("SELECT * FROM runs WHERE workspace_id=? ORDER BY created_at", (user["workspace_id"],)).fetchall()]
+        result = account_result(user, request.cookies[auth.cookie_name])
+        result.pop("csrf_token", None)
+        return {"account": result, "runs": [{**public_run(row), "context": row["private"]["request"]["context"]} for row in rows]}
+
+    @app.delete("/api/v1/account")
+    async def account_delete(body: PasswordBody, request: Request, user=Depends(account_user)):
+        auth.limit(request, "delete", count=5)
+        if not await auth.password_work(verify_password, body.password, user["password_hash"]):
+            raise HTTPException(401, "Password is incorrect")
+        async with billing.deletion_guard(user):
+            pending = auth.freeze_account(user)
+        response = JSONResponse({"account_deleted": True, "gateway_content_deleted": True,
+            "cleanup_pending": bool(pending), "cleanup_task_ids": pending,
+            "notes": ["Minimal encrypted resource references remain while upstream erasure is pending.",
+                      "Payment transaction records may be retained for accounting; provider backups follow their own retention policies."]})
+        auth.logout(request, response)
+        return response
+
+    class CheckoutBody(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        plan: Literal["solo", "studio", "agency"]
+
+    @app.post("/api/v1/billing/checkout")
+    async def checkout(body: CheckoutBody, user=Depends(account_user)):
+        return {"url": await billing.checkout(user, body.plan)}
+
+    @app.post("/api/v1/billing/portal")
+    async def portal(user=Depends(account_user)):
+        return {"url": await billing.portal(user)}
+
+    @app.post("/api/v1/billing/webhook")
+    async def stripe_webhook(request: Request):
+        return await billing.webhook(await request.body(), request.headers.get("stripe-signature", ""))
 
     @app.get("/health")
     async def health():
@@ -183,10 +370,23 @@ def create_app(settings=None, *, engine=None, launch_jobs=True):
                           "max_active_runs": settings.max_active_runs, "credit_cost_formula": "1 + rounds",
                           "max_agents": settings.max_agents},
                 "privacy": {"gateway_encryption": True, "upstream_processors": ["Operator-configured LLM provider", "Zep Cloud"], "notes": PRIVACY_NOTES},
-                "billing": {"enabled": False, "mode": "operator-managed pilot"}}
+                "billing": {"enabled": billing.enabled, "mode": "subscription" if billing.enabled else "operator-managed"}}
+
+    class QuoteBody(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        rounds: int = Field(ge=1, le=20, strict=True)
+
+    @app.post("/api/v1/runs/quote")
+    async def quote_run(body: QuoteBody, ws=Depends(workspace)):
+        if body.rounds > settings.max_rounds:
+            raise HTTPException(422, "Round count exceeds the workspace limit")
+        return {"credits_required": 1 + body.rounds, "credits_remaining": ws["credits"],
+                "sufficient": ws["credits"] >= 1 + body.rounds}
 
     @app.post("/api/v1/runs", status_code=202)
     async def create_run(body: NewRun, ws=Depends(workspace)):
+        if not settings.engine_enabled:
+            raise HTTPException(503, "Real simulations are not enabled on this deployment")
         if body.rounds > settings.max_rounds:
             raise HTTPException(422, "Round count exceeds the workspace limit")
         payload = body.model_dump()
@@ -194,10 +394,6 @@ def create_app(settings=None, *, engine=None, launch_jobs=True):
             rid = store.reserve(ws["id"], payload, settings.max_active_runs, settings.max_active_global)
         except QuotaExceeded as exc:
             raise HTTPException(429, str(exc)) from exc
-        if launch_jobs:
-            task = asyncio.create_task(execute(ws["id"], rid, payload))
-            jobs.add(task)
-            task.add_done_callback(jobs.discard)
         return public_run(store.get(ws["id"], rid))
 
     @app.get("/api/v1/runs")
@@ -220,5 +416,7 @@ def create_app(settings=None, *, engine=None, launch_jobs=True):
             raise HTTPException(409, "Wait for the run to finish before deleting it")
         return await delete_row(row)
 
+    if Path(settings.static_directory).is_dir():
+        app.mount("/", StaticFiles(directory=settings.static_directory, html=True), name="frontend")
     return app
 

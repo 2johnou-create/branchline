@@ -189,6 +189,9 @@ def test_restart_marks_tasks_interrupted_without_replaying(settings):
     store = Store(settings.database, settings.encryption_key)
     wid, token = store.provision("Restart", 30)
     rid = store.reserve(wid, PAYLOAD, 1, 2)
+    store.claim_next("previous-worker")
+    with store.connection(write=True) as db:
+        db.execute("UPDATE job_queue SET lease_until=0 WHERE run_id=?", (rid,))
     app = create_app(settings, engine=FakeEngine())
     with TestClient(app) as client:
         result = client.get(f"/api/v1/runs/{rid}", headers=auth(token)).json()
@@ -210,6 +213,8 @@ def test_real_engine_adapter_api_flow_and_caps(settings):
         ("POST", "/api/simulation/prepare/status", {"status": "ready", "progress": 100}),
         ("POST", "/api/simulation/start", {"runner_status": "running"}),
         ("GET", "/api/simulation/sim_1/run-status", {"runner_status": "running", "progress_percent": 30}),
+        ("GET", "/api/simulation/sim_1/run-status", {"runner_status": "running", "progress_percent": 100, "twitter_completed": True}),
+        ("POST", "/api/simulation/close-env", {"success": True}),
         ("GET", "/api/simulation/sim_1/run-status", {"runner_status": "completed"}),
         ("POST", "/api/report/generate", {"report_id": "report_1", "task_id": "report_task"}),
         ("POST", "/api/report/generate/status", {"status": "completed", "progress": 100}),
@@ -274,3 +279,24 @@ def test_engine_cleanup_acknowledges_failures_without_losing_references(settings
     assert result["project_and_cloud_graph"] == "operator_cleanup_required"
     assert result["report"] == "deletion_acknowledged"
     assert result["simulation_artifacts"] == "operator_cleanup_required"
+
+
+def test_hardened_engine_artifact_cleanup_requires_positive_acknowledgement(settings):
+    settings = replace(settings, engine_cleanup_secret="shared-private-cleanup-key")
+    def handler(request):
+        if request.url.path.startswith("/internal/"):
+            assert request.headers["x-branchline-cleanup-key"] == "shared-private-cleanup-key"
+            return httpx.Response(200, json={"success": True, "data": {"deleted": True}})
+        return httpx.Response(200, json={"success": True, "data": {"runner_status": "completed"}})
+    receipt = asyncio.run(Engine(settings, transport=httpx.MockTransport(handler)).cleanup({"simulation_id": "sim_1"}))
+    assert receipt["simulation_artifacts"] == "deletion_acknowledged"
+
+
+def test_older_engine_404_does_not_imply_artifact_erasure(settings):
+    settings = replace(settings, engine_cleanup_secret="shared-private-cleanup-key")
+    def handler(request):
+        if request.url.path.startswith("/internal/"):
+            return httpx.Response(404, json={"error": "Route not found"})
+        return httpx.Response(200, json={"success": True, "data": {"runner_status": "completed"}})
+    receipt = asyncio.run(Engine(settings, transport=httpx.MockTransport(handler)).cleanup({"simulation_id": "sim_1"}))
+    assert receipt["simulation_artifacts"] == "operator_cleanup_required"

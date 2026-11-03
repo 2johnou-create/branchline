@@ -1,75 +1,85 @@
 # Branchline
 
-**Rehearse your next move.** An accessible public interface for [MiroFish](https://github.com/666ghj/MiroFish), with guided briefs, browser-local redaction, explicit processing receipts, and a private engine gateway.
+**Rehearse your next move.** A public-facing decision rehearsal platform built around [MiroFish](https://github.com/666ghj/MiroFish).
 
-[Public app](https://branchline-studio.misty-jelly-1931.chatgpt.site) · [Business plan](docs/BUSINESS.md) · [Privacy and data flow](docs/PRIVACY.md) · [Deployment](docs/DEPLOYMENT.md) · [Launch requirements](docs/LAUNCH.md)
+[Interface preview](https://branchline-studio.misty-jelly-1931.chatgpt.site) · [First-time setup](docs/SETUP.md) · [Deploy on Render](https://render.com/deploy?repo=https://github.com/2johnou-create/branchline) · [Business plan](docs/BUSINESS.md) · [Privacy](docs/PRIVACY.md)
 
-## What works now
+## Implemented application
 
-- Public responsive dashboard with three guided scenario templates.
-- Browser-local sample reports, editable briefs, identifier redaction preview, report/receipt exports and session data clearing.
-- A separate connected mode for a deployed gateway. Connection tokens stay in page memory; model and Zep keys stay on the server.
-- Authenticated workspace gateway with isolated run records, encrypted gateway storage, bounded workloads and a real MiroFish API adapter.
-- Complete upstream engine source pinned at `7657031ac01184afe2cb220f5ee3545573b5e843`, plus private container configuration.
+- Guided launch, pricing and response scenarios with a local redaction and exact-payload review.
+- Same-origin signup, email verification, login, recovery and logout; hashed passwords/sessions, HttpOnly cookies and CSRF protection.
+- Separate private workspaces, encrypted brief/report payloads, account export and account deletion.
+- Server-quoted workload credits, atomic reservations, persisted single-node job claims/leases, restart handling and bounded MiroFish orchestration.
+- Real engine graph/profile/simulation/report flow, including orderly closure after the selected rounds finish.
+- Optional Stripe-hosted checkout and portal, signed webhooks, idempotent invoice credits and subscription lifecycle handling.
+- Per-run retention, authenticated private simulation-file deletion, encrypted unresolved-cleanup records and automatic retries.
+- Responsive browser interface, safe report rendering and clearly labelled optional prewritten examples.
 
-**The public deployment starts in demo mode.** Its example reports are prewritten illustrations, not live inference, measured customer sentiment or forecasts. Live jobs require your deployed backend and provider credentials. Signup, checkout, recurring billing, team invitations and automatic retention are not enabled. Plan prices describe the proposed business, not products currently available for purchase.
+**Deployment status:** the linked Sites address serves the interface and setup guidance. The Python app and engine require a container host plus LLM/Zep credentials. The repository includes the implementation and deployment Blueprint, but no hosting account, API balance, sender account or Stripe merchant account is created by cloning it. Live inference, email delivery and payments must be verified with the operator's accounts before customers use them. Checkout is disabled by default even when Stripe keys are configured.
 
-## Try the interface locally
+## First-time setup
 
-No frontend package installation is required:
+Follow [SETUP.md](docs/SETUP.md) to create the provider accounts and configure their secrets. The Render Blueprint deploys the combined public app/API and a private engine, with persistent disks. Review Render's paid resources before approval. The private engine receives model/Zep keys; the public application receives account/email/payment settings.
+
+Normal customers sign in to the combined application URL; they do not need a gateway URL or workspace token. Advanced operator tokens remain available for pilot provisioning and live verification.
+
+For your own Docker host:
 
 ```sh
-python3 -m http.server 8080 --directory dist --bind 127.0.0.1
+cp .env.example .env
+# Replace the generated-secret placeholders and configure providers/SMTP.
+docker compose up --build -d
 ```
 
-Open `http://localhost:8080`. Drafts and credentials are lost on refresh unless a feature explicitly offers an opt-in save. Redaction detects common email and telephone patterns; inspect every outgoing field yourself.
+Open `http://127.0.0.1:8080` for the local combined app. Set its exact HTTPS public origin before production. Keep the native engine port private. Enable `BRANCHLINE_ENGINE_ENABLED` only after configuring the engine, and enable `BRANCHLINE_BILLING_ENABLED` only after verification. See [the server operating guide](server/README.md) for every setting and route.
 
-## Run the real engine
+To preview only the static interface without accounts/inference:
 
-You need Docker Compose, an OpenAI-compatible LLM account and a Zep Cloud account. Provider usage may incur charges. Start with a small brief and few rounds. No API key is needed to explore the browser demo.
-
-1. Copy `.env.example` to `.env` and configure server secrets, provider keys, permitted browser origin and the gateway database encryption key. Follow [server/README.md](server/README.md) for the exact settings and workspace provisioning command.
-2. Build and start with `docker compose up --build -d`.
-3. Run `docker compose exec gateway python scripts/provision-workspace.py --name 'Pilot workspace' --credits 30`. Save the issued token securely; the database stores its hash. See the server README for rotation and credit resets.
-4. In Branchline **Settings**, enter your gateway URL and workspace token. Inspect the returned capabilities before submitting a job.
-
-The default gateway bind is local. For a public live service, place the gateway behind HTTPS on a server you control and set its exact public browser origin in CORS. Never publish MiroFish port `5001` or its original development UI. The compose configuration keeps the engine on a private container network. Use encrypted host disks for engine files and backups; gateway database encryption does not encrypt upstream simulation artifacts.
-
-The gateway is intentionally a single application process. Background tasks are bounded but not a distributed durable job queue. Review restart recovery, cleanup receipts, token rotation, provider budgets and backup restoration before accepting paying customers. Workload credits are quotas; they are not a measured dollar spending guarantee.
-
-## Source structure
-
-| Path | Purpose |
-| --- | --- |
-| `dist/` | Standalone public app, with no third-party scripts or analytics |
-| `server/` | Private-tenant gateway, storage and upstream adapter |
-| `tests/server/` | Authentication, isolation, quota and engine-contract tests |
-| `engine/mirofish/` | Unmodified pinned upstream source and notices |
-| `deploy/engine_entry.py` | Private WSGI entrypoint; disables upstream Python request logging |
-| `engine.Dockerfile` | Backend-only engine image, unprivileged runtime |
-| `docker-compose.yml` | Gateway and private engine deployment |
-| `docs/` | Business model, data boundaries and launch plan |
-
-The cloud model and graph services process plaintext during inference. Engine files may retain source material and agent logs. The deletion receipt reports what was actually attempted; it does not certify removal from processor backups. See the privacy document before sending confidential material.
+```sh
+python3 -m http.server 8081 --directory dist --bind 127.0.0.1
+```
 
 ## Verify
 
+Python 3.12+ for the gateway; the engine image pins Python 3.11. The CPU container installer preserves upstream's frozen dependency versions while selecting the matching official CPU PyTorch build instead of unnecessary CUDA packages.
+
 ```sh
 python3 -m venv .venv
-.venv/bin/python -m pip install -r server/requirements.txt pytest
-.venv/bin/python -m pytest tests/server -q
+.venv/bin/python -m pip install -r server/requirements-dev.txt
+.venv/bin/python -m pytest tests -q
 node --check dist/app.js
-python3 -m py_compile deploy/engine_entry.py
+node --check dist/platform.js
 ```
 
-These tests use an HTTP mock for the upstream engine; they do not establish live model quality, provider billing or performance. Run a real small-budget end-to-end job after configuring your deployment.
+GitHub Actions also builds both Docker images and imports the real OASIS runtime, then checks the private engine health/CORS/cleanup protections without any network or provider credentials. Account, payment and upstream API tests use fixtures/mocks; passing them does not establish actual provider access, mail delivery or research quality.
 
-## Public hosting
+Once the operator has configured a deployment, provision a small verification workspace and run:
 
-The static app is published using Sites. `.openai/hosting.json` identifies that deployment; only `dist/` is served. GitHub contains the corresponding source, including the separate Python engine. Sites' static hosting does not run the Python engine.
+```sh
+python scripts/verify-live.py --api https://YOUR-APP.onrender.com
+```
 
-You can also serve `dist/` with any static HTTPS host and deploy the gateway on a separate Docker host. Set the gateway's CORS allowlist to the actual browser origin. Review the hosting provider's access logs and privacy terms before adopting a public privacy policy.
+That command performs real one-round work and can incur provider charges. See the [setup guide](docs/SETUP.md#5-verify-real-inference-before-charging-customers) before running it.
 
-## Licence and attribution
+## Data and commercial boundaries
 
-GNU AGPL-3.0; see [LICENSE](LICENSE) and [NOTICE](NOTICE). MiroFish's original notices remain in the vendored source. Branchline adds a new interface, gateway and deployment files; the upstream engine is not claimed as original work. Keep a prominent source link for the version served and preserve source/build instructions when redistributing or changing the hosted application. This project is not affiliated with the original MiroFish authors.
+Cloud inference processes plaintext. Gateway field encryption does not encrypt every metadata column or the engine volume. Use encrypted disks/backups, protect the master secret, and inspect deletion receipts: provider backups and legally retained payment records have separate lifecycles. [Full data flow and retention details](docs/PRIVACY.md).
+
+Credits are bounded workload allowances (`1 + rounds`), not a measured provider-spend guarantee. Plans are AUD49/199/599 monthly with 30/150/500 credits, with operator-configured Stripe Prices. Configure tax presentation, terms and support before live checkout. This is a single-instance service with a durable SQLite queue, not a horizontally scaled hosted enterprise platform. [Launch and operating requirements](docs/LAUNCH.md).
+
+## Source
+
+| Path | Purpose |
+| --- | --- |
+| `dist/` | Public interface; no third-party scripts or analytics |
+| `server/` | Accounts, workspaces, billing, jobs, storage and engine adapter |
+| `tests/` | Isolation, accounts, billing, queue and erasure tests |
+| `engine/mirofish/` | Unmodified upstream source pinned at 7657031ac01184afe2cb220f5ee3545573b5e843 |
+| `deploy/` | Container startup, CPU dependency installer, private WSGI and erasure extension |
+| `render.yaml` | Reviewed-host deployment configuration with private networking and disks |
+| `docker-compose.yml` | Local/VPS deployment |
+| `docs/` | Setup, privacy, deployment and business plan |
+
+## Licence
+
+GNU AGPL-3.0; see [LICENSE](LICENSE) and [NOTICE](NOTICE). Original MiroFish notices remain in the vendored source. Branchline adds the interface, SaaS gateway, deployment files and private cleanup extension. Preserve the corresponding-source link and build instructions when serving a modified release. The project is not affiliated with the original MiroFish authors.

@@ -21,6 +21,13 @@ if Config.validate():
 application = create_app()
 application.config.update(DEBUG=False, TESTING=False, MAX_CONTENT_LENGTH=131072)
 
+from engine_cleanup import register_cleanup  # noqa: E402
+from app.models.task import TaskManager  # noqa: E402
+from app.services.simulation_runner import SimulationRunner  # noqa: E402
+
+register_cleanup(application, SimulationRunner.RUN_STATE_DIR, SimulationRunner,
+                 TaskManager(), os.environ.get("BRANCHLINE_ENGINE_CLEANUP_SECRET", ""))
+
 # The engine is reached server-to-server, never by a browser. Override the
 # upstream wildcard CORS response without altering the vendored project.
 def remove_browser_cors(response):

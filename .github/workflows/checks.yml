@@ -11,7 +11,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install -r server/requirements.txt pytest
-      - run: python -m pytest tests/server -q
+      - run: python -m pytest tests -q
   interface:
     runs-on: ubuntu-latest
     steps:
@@ -20,4 +20,5 @@ jobs:
         with:
           node-version: '22'
       - run: node --check dist/app.js
+      - run: node --check dist/platform.js
       - run: python -m py_compile deploy/engine_entry.py
