@@ -11,6 +11,7 @@ COPY engine/mirofish/locales/ /app/locales/
 COPY deploy/engine_entry.py ./engine_entry.py
 COPY deploy/engine_boot.py ./engine_boot.py
 COPY deploy/engine_cleanup.py ./engine_cleanup.py
+COPY deploy/run_twitter_simulation.py ./scripts/run_twitter_simulation.py
 RUN useradd --create-home --uid 10001 --shell /bin/sh branchline \
     && mkdir -p /home/branchline/.ssh \
     && chmod 700 /home/branchline/.ssh \

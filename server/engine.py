@@ -106,12 +106,14 @@ class Engine:
                     break
                 if status == "failed":
                     raise EngineFailure("The scenario run failed. Contact your workspace operator.")
-                # Upstream keeps the process alive for interviews after the
-                # simulation_end event. Its runner becomes terminal only after
-                # the environment closes; 100% progress alone is not sufficient.
-                if state.get("twitter_completed") is True and not environment_closed:
-                    await self.call(client, "POST", "/api/simulation/close-env", json={"simulation_id": sid, "timeout": 10})
-                    environment_closed = True
+                # Upstream publishes env_alive only after all rounds finish
+                # and the interview IPC loop can accept close_env. Completion
+                # events can precede IPC readiness, and legacy jobs lack them.
+                if not environment_closed:
+                    environment = await self.call(client, "POST", "/api/simulation/env-status", json={"simulation_id": sid})
+                    if environment.get("env_alive") is True:
+                        await self.call(client, "POST", "/api/simulation/close-env", json={"simulation_id": sid, "timeout": 10})
+                        environment_closed = True
                 progress = min(100, max(0, float(state.get("progress_percent", 0))))
                 update(progress=55 + int(progress * .25))
                 await asyncio.sleep(self.settings.poll_interval)

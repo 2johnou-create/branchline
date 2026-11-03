@@ -47,6 +47,15 @@ jobs:
             docker rm -f "$cid" >/dev/null
             trap - EXIT
           done
+      - name: Verify Twitter entrypoint routes to the structured runner
+        run: |
+          docker run --rm --network none -e LLM_API_KEY=nonfunctional-ci-placeholder -e ZEP_API_KEY=nonfunctional-ci-placeholder branchline-engine:check python scripts/run_twitter_simulation.py --help >/tmp/twitter-help.txt
+          python - <<'PY'
+          from pathlib import Path
+          help_text = Path('/tmp/twitter-help.txt').read_text()
+          assert '--twitter-only' in help_text and '--max-rounds' in help_text
+          print('Structured single-platform entrypoint passed')
+          PY
       - name: Verify missing provider keys produce safe boot diagnostics
         shell: bash
         run: |

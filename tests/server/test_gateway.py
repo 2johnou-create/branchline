@@ -200,7 +200,8 @@ def test_restart_marks_tasks_interrupted_without_replaying(settings):
         assert store.workspace(token)["credits"] == 24
 
 
-def test_real_engine_adapter_api_flow_and_caps(settings):
+@pytest.mark.parametrize("structured_completion", [True, False])
+def test_real_engine_adapter_api_flow_and_caps(settings, structured_completion):
     responses = [
         ("POST", "/api/graph/ontology/generate", {"project_id": "proj_1"}),
         ("POST", "/api/graph/build", {"task_id": "graph_task"}),
@@ -213,7 +214,11 @@ def test_real_engine_adapter_api_flow_and_caps(settings):
         ("POST", "/api/simulation/prepare/status", {"status": "ready", "progress": 100}),
         ("POST", "/api/simulation/start", {"runner_status": "running"}),
         ("GET", "/api/simulation/sim_1/run-status", {"runner_status": "running", "progress_percent": 30}),
-        ("GET", "/api/simulation/sim_1/run-status", {"runner_status": "running", "progress_percent": 100, "twitter_completed": True}),
+        ("POST", "/api/simulation/env-status", {"env_alive": False}),
+        ("GET", "/api/simulation/sim_1/run-status", {"runner_status": "running", "progress_percent": 100, "twitter_completed": structured_completion}),
+        ("POST", "/api/simulation/env-status", {"env_alive": False}),
+        ("GET", "/api/simulation/sim_1/run-status", {"runner_status": "running", "progress_percent": 100 if structured_completion else 0, "twitter_completed": structured_completion}),
+        ("POST", "/api/simulation/env-status", {"env_alive": True}),
         ("POST", "/api/simulation/close-env", {"success": True}),
         ("GET", "/api/simulation/sim_1/run-status", {"runner_status": "completed"}),
         ("POST", "/api/report/generate", {"report_id": "report_1", "task_id": "report_task"}),
